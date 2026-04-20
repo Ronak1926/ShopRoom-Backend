@@ -1,0 +1,29 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Customer {
+  id                  String   @id @default(cuid())
+  fullName            String
+  email               String   @unique
+  passwordHash        String?
+  firebaseUid         String?  @unique
+  allowLocationAccess Boolean  @default(false)
+  latitude            Float?
+  longitude           Float?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}

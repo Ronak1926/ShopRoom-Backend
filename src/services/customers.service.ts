@@ -92,6 +92,44 @@ export async function getCustomerById(id: string) {
   return cusomer ? toSafeCustomer(cusomer) : null;
 }
 
+export async function googleAuthCustomer(input: {
+  firebaseUid: string;
+  email: string;
+  fullName: string;
+}) {
+  // Try to find by firebaseUid first, then fall back to email
+  let customer = await prisma.customer.findUnique({
+    where: { firebaseUid: input.firebaseUid },
+  });
+
+  if (!customer) {
+    customer = await prisma.customer.findUnique({
+      where: { email: input.email },
+    });
+
+    if (customer) {
+      // Existing email-based account — link it to the Google uid
+      customer = await prisma.customer.update({
+        where: { id: customer.id },
+        data: { firebaseUid: input.firebaseUid },
+      });
+    } else {
+      // Brand-new customer — create without a password
+      customer = await prisma.customer.create({
+        data: {
+          fullName: input.fullName,
+          email: input.email,
+          firebaseUid: input.firebaseUid,
+          passwordHash: null,
+          allowLocationAccess: false,
+        },
+      });
+    }
+  }
+
+  return { ok: true as const, customer: toSafeCustomer(customer) };
+}
+
 export async function loginCustomer(input: {
   email: string;
   password: string;

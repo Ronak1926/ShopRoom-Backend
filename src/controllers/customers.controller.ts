@@ -4,10 +4,11 @@ import { parseBody } from "../utils/validate.js";
 import { signCustomerToken } from "../utils/jwt.js";
 import {
   getCustomerById,
+  googleAuthCustomer,
   loginCustomer,
   registerCustomer,
 } from "../services/customers.service.js";
-import e from "express";
+import { firebaseAuth } from "../lib/firebaseAdmin.js";
 
 const registerCustomerSchema = z
   .object({
@@ -127,4 +128,32 @@ export async function loginCustomerHandler(req: Request, res: Response) {
   return res.json({
     token,
   });
+}
+
+export async function googleAuthCustomerHandler(req: Request, res: Response) {
+  const parsed = parseBody<GoogleAuthDto>(req, googleAuthSchema);
+  if (!parsed.ok) {
+    return validationError(res, parsed.error);
+  }
+
+  let decodedToken;
+  try {
+    decodedToken = await firebaseAuth.verifyIdToken(parsed.data.idToken);
+  } catch {
+    return res.status(401).json({ message: "Invalid or expired Google token" });
+  }
+
+  const { uid, email, name } = decodedToken;
+  if (!email) {
+    return res.status(400).json({ message: "Google account has no email" });
+  }
+
+  const result = await googleAuthCustomer({
+    firebaseUid: uid,
+    email,
+    fullName: name ?? email.split("@")[0],
+  });
+
+  const token = signCustomerToken(result.customer.id);
+  return res.json({ token, customer: result.customer });
 }

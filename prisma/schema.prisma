@@ -60,7 +60,12 @@ model Shopkeeper {
   passwordHash      String
   shopName          String
   shopCategory      String
-  shopAddress       String
+  address           String
+  city              String
+  state             String
+  pincode           String
+  latitude          Float?
+  longitude         Float?
   phoneNumber       String
   logoUrl           String?
   planType          String

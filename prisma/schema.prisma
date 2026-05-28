@@ -39,3 +39,48 @@ model EmailOtp {
 
   @@index([email])
 }
+
+// ─── Shopkeeper ───────────────────────────────────────────────────────────────
+
+model ShopkeeperDraft {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  currentStep   Int      @default(1)
+  data          Json     @default("{}")
+  phoneVerified Boolean  @default(false)
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Shopkeeper {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  passwordHash      String
+  shopName          String
+  shopCategory      String
+  shopAddress       String
+  phoneNumber       String
+  logoUrl           String?
+  planType          String
+  planExpiresAt     DateTime
+  // ── Razorpay payment fields ─────────────────────────────────────────────────
+  razorpayOrderId   String? // Razorpay order ID (order_xxx) created before checkout
+  razorpayPaymentId String? // Razorpay payment ID (pay_xxx) captured after success
+  // ── Stripe (commented out — replaced by Razorpay) ──────────────────────────
+  // stripePaymentId String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model PhoneOtp {
+  id          String   @id @default(cuid())
+  phoneNumber String
+  code        String
+  expiresAt   DateTime
+  used        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([phoneNumber])
+}

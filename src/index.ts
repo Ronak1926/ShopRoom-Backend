@@ -7,6 +7,7 @@ import { customersRouter } from "./routes/customers.js";
 import { otpRouter } from "./routes/otp.js";
 import { shopkeeperRouter } from "./routes/shopkeeper.js";
 import { shopRouter } from "./routes/shop.js";
+import { roomsRouter } from "./routes/rooms.js";
 import { connectDatabase } from "./database/prisma.js";
 import { cleanupExpiredDrafts } from "./services/shopkeeper.service.js";
 
@@ -32,6 +33,7 @@ app.use("/api/customers", customersRouter);
 app.use("/api/otp", otpRouter);
 app.use("/api/shopkeeper", shopkeeperRouter);
 app.use("/api/shop", shopRouter);
+app.use("/api/rooms", roomsRouter);
 
 connectDatabase().then(() => {
   // Clean up expired shopkeeper drafts on startup

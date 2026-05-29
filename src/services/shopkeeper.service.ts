@@ -6,6 +6,11 @@ import {
   createRazorpayOrder,
   verifyPaymentSignature,
 } from "../lib/razorpay.js";
+import {
+  generateUniqueInviteCode,
+  buildInviteLink,
+} from "../utils/inviteCode.js";
+import type { RegistrationResult } from "../types/index.js";
 // import Stripe from "stripe"; // ── commented out: replaced by Razorpay ──
 import bcrypt from "bcrypt";
 
@@ -187,12 +192,20 @@ export async function createOrder(draftId: string, planType: string) {
 }
 
 /**
- * Verifies the Razorpay payment signature, then creates the shopkeeper account.
+ * Verifies the Razorpay payment signature, then — in a single atomic
+ * transaction — creates the Shopkeeper, Shop, and Room records.
  *
- * This is the critical security step:
- *  • Signature = HMAC_SHA256(orderId + "|" + paymentId, KEY_SECRET)
- *  • If invalid → reject immediately (possible tampering)
- *  • If valid   → register shopkeeper and clean up draft
+ * Transaction steps:
+ *  1. Verify HMAC signature (before any DB write)
+ *  2. Load & validate draft
+ *  3. Create Shopkeeper (auth + plan)
+ *  4. Create Shop (business entity)
+ *  5. Generate a unique invite code (collision-checked inside the tx)
+ *  6. Create Room (linked to shop, invite code set)
+ *  7. Delete draft
+ *
+ * Returns RegistrationResult so the caller can forward shopId / roomId /
+ * inviteCode to the frontend in a single response.
  */
 export async function verifyPaymentAndRegister(
   draftId: string,
@@ -200,7 +213,7 @@ export async function verifyPaymentAndRegister(
   razorpayPaymentId: string,
   razorpaySignature: string,
   planType: string,
-) {
+): Promise<RegistrationResult> {
   // ── 1. Verify signature ──────────────────────────────────────────────────────
   const valid = verifyPaymentSignature(
     razorpayOrderId,
@@ -213,7 +226,7 @@ export async function verifyPaymentAndRegister(
     );
   }
 
-  // ── 2. Load draft ────────────────────────────────────────────────────────────
+  // ── 2. Load draft (outside transaction — fast read) ──────────────────────────
   const draft = await prisma.shopkeeperDraft.findUnique({
     where: { id: draftId },
   });
@@ -228,32 +241,82 @@ export async function verifyPaymentAndRegister(
   const days = PLAN_DAYS[planType] ?? 30;
   const planExpiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 
-  // ── 4. Create Shopkeeper record ──────────────────────────────────────────────
-  const shopkeeper = await prisma.shopkeeper.create({
-    data: {
-      email: draft.email,
-      passwordHash: draft.passwordHash,
-      shopName: (data.shopName as string) ?? "",
-      shopCategory: (data.shopCategory as string) ?? "",
-      address: (data.address as string) ?? "",
-      city: (data.city as string) ?? "",
-      state: (data.state as string) ?? "",
-      pincode: (data.pincode as string) ?? "",
-      latitude: (data.latitude as number) ?? null,
-      longitude: (data.longitude as number) ?? null,
-      phoneNumber: (data.phoneNumber as string) ?? "",
-      logoUrl: (data.logoUrl as string) ?? null,
-      planType,
-      planExpiresAt,
-      razorpayOrderId,
-      razorpayPaymentId,
-    },
+  // ── 4–7. Atomic transaction ──────────────────────────────────────────────────
+  const result = await prisma.$transaction(async (tx) => {
+    // 4a. Create Shopkeeper (auth + plan metadata)
+    const shopkeeper = await tx.shopkeeper.create({
+      data: {
+        email: draft.email,
+        passwordHash: draft.passwordHash,
+        shopName: (data.shopName as string) ?? "",
+        shopCategory: (data.shopCategory as string) ?? "",
+        address: (data.address as string) ?? "",
+        city: (data.city as string) ?? "",
+        state: (data.state as string) ?? "",
+        pincode: (data.pincode as string) ?? "",
+        latitude: (data.latitude as number) ?? null,
+        longitude: (data.longitude as number) ?? null,
+        phoneNumber: (data.phoneNumber as string) ?? "",
+        logoUrl: (data.logoUrl as string) ?? null,
+        planType,
+        planExpiresAt,
+        razorpayOrderId,
+        razorpayPaymentId,
+      },
+    });
+
+    // 4b. Build GeoJSON coordinates (only when both lat and lng are present)
+    const lat = (data.latitude as number | null) ?? null;
+    const lng = (data.longitude as number | null) ?? null;
+    const coordinates =
+      lat != null && lng != null
+        ? { type: "Point", coordinates: [lng, lat] }
+        : undefined;
+
+    // 4c. Create Shop (business entity linked to Shopkeeper)
+    const shop = await tx.shop.create({
+      data: {
+        ownerId: shopkeeper.id,
+        shopName: (data.shopName as string) ?? "",
+        category: (data.shopCategory as string) ?? "",
+        description: (data.description as string) ?? null,
+        logoUrl: (data.logoUrl as string) ?? null,
+        address: (data.address as string) ?? "",
+        city: (data.city as string) ?? "",
+        state: (data.state as string) ?? "",
+        pincode: (data.pincode as string) ?? "",
+        phoneNumber: (data.phoneNumber as string) ?? "",
+        latitude: lat,
+        longitude: lng,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        coordinates: coordinates as any,
+      },
+    });
+
+    // 5. Generate a unique invite code (collision-checked inside this tx)
+    const inviteCode = await generateUniqueInviteCode(tx);
+
+    // 6. Create Room (auto-created for every shop)
+    const room = await tx.room.create({
+      data: {
+        shopId: shop.id,
+        inviteCode,
+      },
+    });
+
+    // 7. Delete draft — registration is complete
+    await tx.shopkeeperDraft.delete({ where: { id: draftId } });
+
+    return { shopkeeper, shop, room };
   });
 
-  // ── 5. Clean up draft ────────────────────────────────────────────────────────
-  await prisma.shopkeeperDraft.delete({ where: { id: draftId } });
-
-  return shopkeeper;
+  return {
+    shopkeeperId: result.shopkeeper.id,
+    shopId: result.shop.id,
+    roomId: result.room.id,
+    inviteCode: result.room.inviteCode,
+    inviteLink: buildInviteLink(result.room.inviteCode),
+  };
 }
 
 // ─── Stripe (commented out — replaced by Razorpay) ───────────────────────────

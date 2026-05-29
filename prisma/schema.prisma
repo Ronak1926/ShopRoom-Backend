@@ -27,6 +27,9 @@ model Customer {
   emailVerified       Boolean  @default(false)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+
+  // Relations
+  memberships Membership[]
 }
 
 model EmailOtp {
@@ -77,6 +80,9 @@ model Shopkeeper {
   // stripePaymentId String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+
+  // Relations
+  shop Shop?
 }
 
 model PhoneOtp {
@@ -88,4 +94,72 @@ model PhoneOtp {
   createdAt   DateTime @default(now())
 
   @@index([phoneNumber])
+}
+
+// ─── Shop / Room ──────────────────────────────────────────────────────────────
+
+/// The shop entity created after payment verification.
+/// Distinct from Shopkeeper (auth + plan). One shopkeeper owns one shop.
+model Shop {
+  id      String     @id @default(cuid())
+  ownerId String     @unique
+  owner   Shopkeeper @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  shopName    String
+  category    String
+  description String?
+  logoUrl     String?
+
+  // Address
+  address     String
+  city        String
+  state       String
+  pincode     String
+  phoneNumber String
+
+  // Location — lat/lng for proximity queries, GeoJSON for API responses
+  latitude    Float?
+  longitude   Float?
+  coordinates Json? // {"type":"Point","coordinates":[lng,lat]}
+
+  // Back-reference: Room holds the FK (Room.shopId)
+  room Room?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
+  @@index([ownerId])
+}
+
+/// The community room auto-created for every shop at registration.
+model Room {
+  id     String @id @default(cuid())
+  shopId String @unique
+  shop   Shop   @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  inviteCode   String       @unique
+  membersCount Int          @default(0)
+  memberships  Membership[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([inviteCode])
+}
+
+/// A customer's membership in a shop's room.
+model Membership {
+  id         String   @id @default(cuid())
+  roomId     String
+  room       Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  joinedAt             DateTime @default(now())
+  notificationsEnabled Boolean  @default(true)
+
+  @@unique([roomId, customerId])
+  @@index([roomId])
+  @@index([customerId])
 }

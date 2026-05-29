@@ -304,7 +304,7 @@ shopkeeperRouter.post(
       return res.status(400).json({ message: "Invalid request" });
 
     try {
-      const shopkeeper = await verifyPaymentAndRegister(
+      const registration = await verifyPaymentAndRegister(
         parsed.data.draftId,
         parsed.data.razorpayOrderId,
         parsed.data.razorpayPaymentId,
@@ -313,7 +313,12 @@ shopkeeperRouter.post(
       );
       return res.json({
         message: "Payment verified. Registration complete.",
-        shopkeeperId: shopkeeper.id,
+        token: signShopkeeperToken(registration.shopkeeperId),
+        shopkeeperId: registration.shopkeeperId,
+        shopId: registration.shopId,
+        roomId: registration.roomId,
+        inviteCode: registration.inviteCode,
+        inviteLink: registration.inviteLink,
       });
     } catch (err: any) {
       console.error("Payment verify:", err?.message);

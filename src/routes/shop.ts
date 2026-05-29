@@ -3,6 +3,7 @@
  *
  * Route map:
  *   GET  /api/shop/me                     — Shopkeeper: get own shop + room info
+ *   PATCH /api/shop/room/images            — Shopkeeper: update logo and/or room cover image
  *   GET  /api/shop/invite/:code           — Public: invite-link preview
  *   POST /api/shop/join/:code             — Customer: join room via invite code
  *   DELETE /api/shop/room/:roomId/leave   — Customer: leave a room
@@ -16,6 +17,7 @@ import {
   getInvitePreview,
   joinShopRoom,
   leaveShopRoom,
+  updateRoomImages,
 } from "../controllers/shop.controller.js";
 
 export const shopRouter = Router();
@@ -24,6 +26,9 @@ export const shopRouter = Router();
 
 /** Returns the authenticated shopkeeper's shop + room details. */
 shopRouter.get("/me", requireShopkeeperAuth, getMyShop);
+
+/** Updates the shop logo and/or room cover background image. */
+shopRouter.patch("/room/images", requireShopkeeperAuth, updateRoomImages);
 
 // ─── Public ───────────────────────────────────────────────────────────────────
 

@@ -13,6 +13,7 @@ import {
   leaveRoom,
 } from "../services/room.service.js";
 import { buildInviteLink } from "../utils/inviteCode.js";
+import { uploadImageToCloudinary } from "../lib/cloudinary.js";
 import type { GeoJsonPoint } from "../types/index.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -40,6 +41,7 @@ export async function getMyShop(req: Request, res: Response): Promise<void> {
           id: true,
           inviteCode: true,
           membersCount: true,
+          coverUrl: true,
           createdAt: true,
         },
       },
@@ -69,6 +71,7 @@ export async function getMyShop(req: Request, res: Response): Promise<void> {
           inviteCode: shop.room.inviteCode,
           inviteLink: buildInviteLink(shop.room.inviteCode),
           membersCount: shop.room.membersCount,
+          coverUrl: shop.room.coverUrl ?? null,
           createdAt: shop.room.createdAt.toISOString(),
         }
       : null,
@@ -146,5 +149,81 @@ export async function leaveShopRoom(
     const e = err as Error;
     console.error("[shop] leaveShopRoom:", e.message);
     res.status(500).json({ message: "Something went wrong" });
+  }
+}
+
+// ─── PATCH /api/shop/room/images ───────────────────────────────────────────────
+// Shopkeeper updates their shop logo and/or room cover image.
+// Both fields are optional; at least one must be supplied.
+// Body: { logoBase64?: string; coverBase64?: string }
+// Auth: requireShopkeeperAuth
+
+export async function updateRoomImages(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const shopkeeperId = req.shopkeeperId!;
+  const { logoBase64, coverBase64 } = req.body as {
+    logoBase64?: string;
+    coverBase64?: string;
+  };
+
+  if (!logoBase64 && !coverBase64) {
+    res
+      .status(400)
+      .json({ message: "Provide at least one of logoBase64 or coverBase64" });
+    return;
+  }
+
+  const shop = await prisma.shop.findUnique({
+    where: { ownerId: shopkeeperId },
+    include: { room: { select: { id: true } } },
+  });
+
+  if (!shop) {
+    res.status(404).json({ message: "Shop not found" });
+    return;
+  }
+
+  try {
+    let logoUrl: string | undefined;
+    let coverUrl: string | undefined;
+
+    // Upload both in parallel if both provided
+    const [resolvedLogo, resolvedCover] = await Promise.all([
+      logoBase64
+        ? uploadImageToCloudinary(logoBase64, "shoproom/logos")
+        : Promise.resolve(undefined),
+      coverBase64
+        ? uploadImageToCloudinary(coverBase64, "shoproom/covers")
+        : Promise.resolve(undefined),
+    ]);
+
+    logoUrl = resolvedLogo;
+    coverUrl = resolvedCover;
+
+    if (logoUrl) {
+      await prisma.shop.update({
+        where: { id: shop.id },
+        data: { logoUrl },
+      });
+    }
+
+    if (coverUrl && shop.room) {
+      await prisma.room.update({
+        where: { id: shop.room.id },
+        data: { coverUrl },
+      });
+    }
+
+    res.json({
+      message: "Images updated successfully",
+      logoUrl: logoUrl ?? null,
+      coverUrl: coverUrl ?? null,
+    });
+  } catch (err: unknown) {
+    const e = err as Error;
+    console.error("[shop] updateRoomImages:", e.message);
+    res.status(500).json({ message: "Failed to upload images" });
   }
 }

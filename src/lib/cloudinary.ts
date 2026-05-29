@@ -1,12 +1,7 @@
 import { v2 as cloudinary } from "cloudinary";
+import { createHash } from "crypto";
 
-/**
- * Uploads a base64 data-URI image to Cloudinary under shoproom/logos/.
- * Returns the permanent HTTPS URL.
- */
-export async function uploadLogoToCloudinary(
-  base64DataUri: string,
-): Promise<string> {
+function configureCloudinary() {
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
   const apiKey = process.env.CLOUDINARY_API_KEY;
   const apiSecret = process.env.CLOUDINARY_API_SECRET;
@@ -17,7 +12,6 @@ export async function uploadLogoToCloudinary(
     );
   }
 
-  // Configure fresh on every call to ensure env vars are picked up correctly.
   cloudinary.config({
     cloud_name: cloudName,
     api_key: apiKey,
@@ -25,18 +19,25 @@ export async function uploadLogoToCloudinary(
     secure: true,
   });
 
-  const timestamp = Math.round(Date.now() / 1000);
-  const folder = "shoproom/logos";
+  return { apiKey, apiSecret };
+}
 
-  // Cloudinary signature = SHA-1 of (sorted_params_string + api_secret)
-  // NOT an HMAC — it's a plain SHA-1 hash with the secret appended to the string.
+/**
+ * Uploads a base64 data-URI image to Cloudinary under the given folder.
+ * Returns the permanent HTTPS URL.
+ */
+export async function uploadImageToCloudinary(
+  base64DataUri: string,
+  folder: string,
+): Promise<string> {
+  const { apiKey, apiSecret } = configureCloudinary();
+  const timestamp = Math.round(Date.now() / 1000);
+
   const paramStr = `folder=${folder}&timestamp=${timestamp}`;
-  const { createHash } = await import("crypto");
   const signature = createHash("sha1")
     .update(paramStr + apiSecret)
     .digest("hex");
 
-  // Pass the pre-computed signature so the SDK skips its own signing.
   const result = await cloudinary.uploader.upload(base64DataUri, {
     folder,
     timestamp,
@@ -46,4 +47,11 @@ export async function uploadLogoToCloudinary(
   });
 
   return result.secure_url;
+}
+
+/** Convenience wrapper — uploads to shoproom/logos/. */
+export async function uploadLogoToCloudinary(
+  base64DataUri: string,
+): Promise<string> {
+  return uploadImageToCloudinary(base64DataUri, "shoproom/logos");
 }

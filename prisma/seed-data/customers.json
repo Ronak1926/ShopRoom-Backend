@@ -1,0 +1,48 @@
+{
+  "maleFirstNames": [
+    "Arjun", "Rahul", "Vikram", "Amit", "Raj",
+    "Prateek", "Suresh", "Deepak", "Kiran", "Nikhil",
+    "Sanjay", "Rohan", "Mohit", "Ankit", "Varun",
+    "Tarun", "Gaurav", "Harsh", "Shubham", "Dev",
+    "Aakash", "Vivek", "Manish", "Pankaj", "Sachin"
+  ],
+  "femaleFirstNames": [
+    "Priya", "Ananya", "Sneha", "Pooja", "Neha",
+    "Riya", "Aisha", "Kavya", "Shruti", "Divya",
+    "Preeti", "Meena", "Sunita", "Radha", "Lakshmi",
+    "Meera", "Nisha", "Sapna", "Reena", "Simran",
+    "Anjali", "Kritika", "Rashmi", "Pallavi", "Swati"
+  ],
+  "surnames": [
+    "Sharma", "Patel", "Singh", "Kumar", "Gupta",
+    "Joshi", "Verma", "Shah", "Agarwal", "Mehta"
+  ],
+  "password": "Customer@123",
+  "total": 500,
+  "locationPools": [
+    {
+      "city": "Ahmedabad",
+      "state": "Gujarat",
+      "lat": 23.0225,
+      "lng": 72.5714,
+      "weight": 0.40,
+      "radiusKm": 6
+    },
+    {
+      "city": "Surat",
+      "state": "Gujarat",
+      "lat": 21.1702,
+      "lng": 72.8311,
+      "weight": 0.32,
+      "radiusKm": 5
+    },
+    {
+      "city": "Mumbai",
+      "state": "Maharashtra",
+      "lat": 19.0760,
+      "lng": 72.8777,
+      "weight": 0.28,
+      "radiusKm": 8
+    }
+  ]
+}

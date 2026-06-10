@@ -172,3 +172,115 @@ export async function discoverRooms(
     categories,
   });
 }
+
+// ── GET /api/rooms/map-pins ────────────────────────────────────────────────────
+// Returns lightweight pin data for all shops with lat/lng.
+// Optional bbox filter: ?swLat=&swLng=&neLat=&neLng=
+// Used by the map – cached aggressively on the client.
+
+export async function mapPins(req: Request, res: Response): Promise<void> {
+  const customerId = req.customerId!;
+  const { swLat, swLng, neLat, neLng } = req.query as Record<string, string>;
+
+  // Customer location for distance calc
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: { allowLocationAccess: true, latitude: true, longitude: true },
+  });
+  const hasLocation =
+    !!customer?.allowLocationAccess &&
+    customer.latitude != null &&
+    customer.longitude != null;
+
+  const shops = await prisma.shop.findMany({
+    where: {
+      latitude: { not: null },
+      longitude: { not: null },
+    },
+    select: {
+      id: true,
+      shopName: true,
+      category: true,
+      logoUrl: true,
+      latitude: true,
+      longitude: true,
+      city: true,
+      room: {
+        select: {
+          id: true,
+          membersCount: true,
+          coverUrl: true,
+          inviteCode: true,
+        },
+      },
+    },
+  });
+
+  // Filter by bbox if provided
+  const hasBbox =
+    swLat !== undefined &&
+    swLng !== undefined &&
+    neLat !== undefined &&
+    neLng !== undefined;
+
+  const filtered = hasBbox
+    ? shops.filter((s) => {
+        const lat = s.latitude!;
+        const lng = s.longitude!;
+        return (
+          lat >= parseFloat(swLat) &&
+          lat <= parseFloat(neLat) &&
+          lng >= parseFloat(swLng) &&
+          lng <= parseFloat(neLng)
+        );
+      })
+    : shops;
+
+  const pins = filtered
+    .filter((s) => s.room !== null)
+    .map((s) => {
+      let distanceKm: number | null = null;
+      if (hasLocation) {
+        distanceKm =
+          Math.round(
+            haversineKm(
+              customer!.latitude!,
+              customer!.longitude!,
+              s.latitude!,
+              s.longitude!,
+            ) * 10,
+          ) / 10;
+      }
+      return {
+        shopId: s.id,
+        roomId: s.room!.id,
+        shopName: s.shopName,
+        category: s.category,
+        logoUrl: s.logoUrl,
+        coverUrl: s.room!.coverUrl,
+        inviteCode: s.room!.inviteCode,
+        membersCount: s.room!.membersCount,
+        lat: s.latitude!,
+        lng: s.longitude!,
+        city: s.city,
+        distanceKm,
+      };
+    });
+
+  // ETag for caching: hash of shop IDs + membersCount
+  const etag = `"${Buffer.from(
+    pins.map((p) => `${p.shopId}:${p.membersCount}`).join(","),
+  )
+    .toString("base64")
+    .slice(0, 32)}"`;
+
+  res.setHeader("ETag", etag);
+  res.setHeader("Cache-Control", "private, max-age=30");
+
+  if (req.headers["if-none-match"] === etag) {
+    res.status(304).end();
+    return;
+  }
+
+  res.json({ total: pins.length, pins });
+}

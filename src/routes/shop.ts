@@ -15,6 +15,7 @@ import { requireCustomerAuth } from "../middleware/customerAuth.js";
 import {
   getMyShop,
   getShopDashboard,
+  getShopMembers,
   getInvitePreview,
   joinShopRoom,
   leaveShopRoom,
@@ -28,8 +29,11 @@ export const shopRouter = Router();
 /** Returns the authenticated shopkeeper's shop + room details. */
 shopRouter.get("/me", requireShopkeeperAuth, getMyShop);
 
-/** Returns full dashboard data: shop info, room stats, members list, recent joins. */
+/** Returns full dashboard data: shop info, room stats, recent joins. */
 shopRouter.get("/dashboard", requireShopkeeperAuth, getShopDashboard);
+
+/** Returns paginated room members. Query: page (0-based), limit (default 10). */
+shopRouter.get("/members", requireShopkeeperAuth, getShopMembers);
 
 /** Updates the shop logo and/or room cover background image. */
 shopRouter.patch("/room/images", requireShopkeeperAuth, updateRoomImages);

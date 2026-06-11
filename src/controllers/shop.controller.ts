@@ -36,7 +36,7 @@ export async function getShopDashboard(
 ): Promise<void> {
   const shopkeeperId = req.shopkeeperId!;
 
-  // Single query: shop + room + last 50 memberships + customers in one round-trip
+  // Single query: shop + room + last 5 memberships for recent activity
   const shop = await prisma.shop.findUnique({
     where: { ownerId: shopkeeperId },
     select: {
@@ -53,13 +53,12 @@ export async function getShopDashboard(
           createdAt: true,
           memberships: {
             orderBy: { joinedAt: "desc" },
-            take: 50,
+            take: 5,
             select: {
               id: true,
               joinedAt: true,
-              notificationsEnabled: true,
               customer: {
-                select: { id: true, fullName: true, email: true },
+                select: { id: true, fullName: true },
               },
             },
           },
@@ -75,23 +74,13 @@ export async function getShopDashboard(
 
   const room = shop.room;
 
-  const members = room
+  const recentJoins = room
     ? room.memberships.map((m) => ({
         id: m.id,
-        customerId: m.customer.id,
         customerName: m.customer.fullName,
-        email: m.customer.email,
         joinedAt: m.joinedAt.toISOString(),
-        notificationsEnabled: m.notificationsEnabled,
       }))
     : [];
-
-  // Last 5 joins = recent activity feed
-  const recentJoins = members.slice(0, 5).map((m) => ({
-    id: m.id,
-    customerName: m.customerName,
-    joinedAt: m.joinedAt,
-  }));
 
   res.json({
     shop: {
@@ -109,8 +98,80 @@ export async function getShopDashboard(
           createdAt: room.createdAt.toISOString(),
         }
       : null,
-    members,
     recentJoins,
+  });
+}
+
+// ─── GET /api/shop/members ────────────────────────────────────────────────────
+// Returns a paginated list of room members for the authenticated shopkeeper.
+// Query params: page (0-based, default 0), limit (default 10, max 100)
+// Auth: requireShopkeeperAuth
+
+export async function getShopMembers(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const shopkeeperId = req.shopkeeperId!;
+
+  const page = Math.max(
+    0,
+    parseInt((req.query.page as string) ?? "0", 10) || 0,
+  );
+  const limit = Math.min(
+    100,
+    Math.max(1, parseInt((req.query.limit as string) ?? "10", 10) || 10),
+  );
+
+  const shop = await prisma.shop.findUnique({
+    where: { ownerId: shopkeeperId },
+    select: {
+      room: {
+        select: {
+          id: true,
+          membersCount: true,
+        },
+      },
+    },
+  });
+
+  if (!shop?.room) {
+    res.json({ members: [], total: 0, page, limit, totalPages: 0 });
+    return;
+  }
+
+  const [memberships, total] = await Promise.all([
+    prisma.membership.findMany({
+      where: { roomId: shop.room.id },
+      orderBy: { joinedAt: "desc" },
+      skip: page * limit,
+      take: limit,
+      select: {
+        id: true,
+        joinedAt: true,
+        notificationsEnabled: true,
+        customer: {
+          select: { id: true, fullName: true, email: true },
+        },
+      },
+    }),
+    prisma.membership.count({ where: { roomId: shop.room.id } }),
+  ]);
+
+  const members = memberships.map((m) => ({
+    id: m.id,
+    customerId: m.customer.id,
+    customerName: m.customer.fullName,
+    email: m.customer.email,
+    joinedAt: m.joinedAt.toISOString(),
+    notificationsEnabled: m.notificationsEnabled,
+  }));
+
+  res.json({
+    members,
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
   });
 }
 

@@ -26,6 +26,94 @@ function toGeoJson(
   return { type: "Point", coordinates: [lng, lat] };
 }
 
+// ─── GET /api/shop/dashboard ──────────────────────────────────────────────────
+// Returns all real-time dashboard data for the authenticated shopkeeper.
+// Auth: requireShopkeeperAuth
+
+export async function getShopDashboard(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const shopkeeperId = req.shopkeeperId!;
+
+  // Single query: shop + room + last 50 memberships + customers in one round-trip
+  const shop = await prisma.shop.findUnique({
+    where: { ownerId: shopkeeperId },
+    select: {
+      id: true,
+      shopName: true,
+      category: true,
+      logoUrl: true,
+      createdAt: true,
+      room: {
+        select: {
+          id: true,
+          inviteCode: true,
+          membersCount: true,
+          createdAt: true,
+          memberships: {
+            orderBy: { joinedAt: "desc" },
+            take: 50,
+            select: {
+              id: true,
+              joinedAt: true,
+              notificationsEnabled: true,
+              customer: {
+                select: { id: true, fullName: true, email: true },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!shop) {
+    res.status(404).json({ message: "Shop not found" });
+    return;
+  }
+
+  const room = shop.room;
+
+  const members = room
+    ? room.memberships.map((m) => ({
+        id: m.id,
+        customerId: m.customer.id,
+        customerName: m.customer.fullName,
+        email: m.customer.email,
+        joinedAt: m.joinedAt.toISOString(),
+        notificationsEnabled: m.notificationsEnabled,
+      }))
+    : [];
+
+  // Last 5 joins = recent activity feed
+  const recentJoins = members.slice(0, 5).map((m) => ({
+    id: m.id,
+    customerName: m.customerName,
+    joinedAt: m.joinedAt,
+  }));
+
+  res.json({
+    shop: {
+      shopName: shop.shopName,
+      category: shop.category,
+      logoUrl: shop.logoUrl ?? null,
+      createdAt: shop.createdAt.toISOString(),
+    },
+    room: room
+      ? {
+          roomId: room.id,
+          inviteCode: room.inviteCode,
+          inviteLink: buildInviteLink(room.inviteCode),
+          membersCount: room.membersCount,
+          createdAt: room.createdAt.toISOString(),
+        }
+      : null,
+    members,
+    recentJoins,
+  });
+}
+
 // ─── GET /api/shop/me ─────────────────────────────────────────────────────────
 // Returns the authenticated shopkeeper's shop + room details.
 // Auth: requireShopkeeperAuth (sets req.shopkeeperId)

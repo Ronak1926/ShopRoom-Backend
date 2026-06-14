@@ -16,6 +16,7 @@ import {
   getMyShop,
   getShopDashboard,
   getShopMembers,
+  getShopProfile,
   getInvitePreview,
   joinShopRoom,
   leaveShopRoom,
@@ -31,6 +32,9 @@ shopRouter.get("/me", requireShopkeeperAuth, getMyShop);
 
 /** Returns full dashboard data: shop info, room stats, recent joins. */
 shopRouter.get("/dashboard", requireShopkeeperAuth, getShopDashboard);
+
+/** Returns full profile data: shopkeeper account + shop details + plan + room stats. */
+shopRouter.get("/profile", requireShopkeeperAuth, getShopProfile);
 
 /** Returns paginated room members. Query: page (0-based), limit (default 10). */
 shopRouter.get("/members", requireShopkeeperAuth, getShopMembers);

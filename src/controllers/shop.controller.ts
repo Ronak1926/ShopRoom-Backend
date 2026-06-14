@@ -228,6 +228,96 @@ export async function getMyShop(req: Request, res: Response): Promise<void> {
   });
 }
 
+// ─── GET /api/shop/profile ──────────────────────────────────────────────────
+// Returns full profile data for the authenticated shopkeeper:
+// shopkeeper account fields + shop details + plan + room quick-stats.
+// Auth: requireShopkeeperAuth
+
+export async function getShopProfile(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const shopkeeperId = req.shopkeeperId!;
+
+  const [shopkeeper, shop] = await Promise.all([
+    prisma.shopkeeper.findUnique({
+      where: { id: shopkeeperId },
+      select: {
+        id: true,
+        email: true,
+        planType: true,
+        planExpiresAt: true,
+        createdAt: true,
+      },
+    }),
+    prisma.shop.findUnique({
+      where: { ownerId: shopkeeperId },
+      select: {
+        shopName: true,
+        category: true,
+        description: true,
+        logoUrl: true,
+        address: true,
+        city: true,
+        state: true,
+        pincode: true,
+        phoneNumber: true,
+        latitude: true,
+        longitude: true,
+        createdAt: true,
+        room: {
+          select: {
+            inviteCode: true,
+            coverUrl: true,
+            membersCount: true,
+            createdAt: true,
+          },
+        },
+      },
+    }),
+  ]);
+
+  if (!shopkeeper || !shop) {
+    res.status(404).json({ message: "Shop not found" });
+    return;
+  }
+
+  res.set("Cache-Control", "private, max-age=30");
+  res.json({
+    shopkeeper: {
+      id: shopkeeper.id,
+      email: shopkeeper.email,
+      createdAt: shopkeeper.createdAt.toISOString(),
+    },
+    shop: {
+      shopName: shop.shopName,
+      category: shop.category,
+      description: shop.description ?? null,
+      logoUrl: shop.logoUrl ?? null,
+      address: shop.address,
+      city: shop.city,
+      state: shop.state,
+      pincode: shop.pincode,
+      phoneNumber: shop.phoneNumber,
+      latitude: shop.latitude ?? null,
+      longitude: shop.longitude ?? null,
+      createdAt: shop.createdAt.toISOString(),
+    },
+    plan: {
+      planType: shopkeeper.planType,
+      planExpiresAt: shopkeeper.planExpiresAt.toISOString(),
+    },
+    room: shop.room
+      ? {
+          inviteCode: shop.room.inviteCode,
+          coverUrl: shop.room.coverUrl ?? null,
+          membersCount: shop.room.membersCount,
+          createdAt: shop.room.createdAt.toISOString(),
+        }
+      : null,
+  });
+}
+
 // ─── GET /api/shop/invite/:code ───────────────────────────────────────────────
 // Public — returns shop preview for the invite link page.
 

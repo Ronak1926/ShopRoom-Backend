@@ -92,6 +92,42 @@ export async function getCustomerById(id: string) {
   return cusomer ? toSafeCustomer(cusomer) : null;
 }
 
+export type JoinedRoom = {
+  roomId: string;
+  shopName: string;
+  category: string;
+  logoUrl: string | null;
+  membersCount: number;
+  joinedAt: string;
+};
+
+/** Rooms the given customer has joined, most recently joined first. */
+export async function getJoinedRooms(customerId: string): Promise<JoinedRoom[]> {
+  const memberships = await prisma.membership.findMany({
+    where: { customerId },
+    orderBy: { joinedAt: "desc" },
+    select: {
+      joinedAt: true,
+      room: {
+        select: {
+          id: true,
+          membersCount: true,
+          shop: { select: { shopName: true, category: true, logoUrl: true } },
+        },
+      },
+    },
+  });
+
+  return memberships.map((m) => ({
+    roomId: m.room.id,
+    shopName: m.room.shop.shopName,
+    category: m.room.shop.category,
+    logoUrl: m.room.shop.logoUrl,
+    membersCount: m.room.membersCount,
+    joinedAt: m.joinedAt.toISOString(),
+  }));
+}
+
 export async function googleAuthCustomer(input: {
   firebaseUid: string;
   email: string;

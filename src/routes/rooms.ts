@@ -6,7 +6,12 @@
 
 import { Router } from "express";
 import { requireCustomerAuth } from "../middleware/customerAuth.js";
-import { discoverRooms, mapPins } from "../controllers/rooms.controller.js";
+import { requireAnyAuth } from "../middleware/anyAuth.js";
+import {
+  discoverRooms,
+  mapPins,
+  getRoomDetails,
+} from "../controllers/rooms.controller.js";
 
 export const roomsRouter = Router();
 
@@ -15,3 +20,6 @@ roomsRouter.get("/discover", requireCustomerAuth, discoverRooms);
 
 /** Lightweight map pins (with optional bbox). Auth: customer JWT. */
 roomsRouter.get("/map-pins", requireCustomerAuth, mapPins);
+
+/** Room chat bootstrap data. Auth: customer or shopkeeper JWT. */
+roomsRouter.get("/:roomId", requireAnyAuth, getRoomDetails);

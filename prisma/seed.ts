@@ -80,6 +80,17 @@ function genInviteCode(): string {
   ).join("");
 }
 
+/** Deterministic owner name per shop index, reusing the customer name pools
+ * so re-running the seed always derives the same name for the same shop
+ * (required so `upsert` backfills existing rows idempotently). */
+function deriveOwnerName(index: number, pool: CustomerPool): string {
+  const isMale = index % 2 === 0;
+  const firstNames = isMale ? pool.maleFirstNames : pool.femaleFirstNames;
+  const firstName = firstNames[index % firstNames.length];
+  const surname = pool.surnames[index % pool.surnames.length];
+  return `${firstName} ${surname}`;
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -97,6 +108,11 @@ async function main() {
     readFileSync(resolve(__dirname, "seed-data/rooms.json"), "utf8"),
   );
 
+  // Loaded early (not just before §2) so §1 can also derive shopkeeper owner names
+  const pool: CustomerPool = JSON.parse(
+    readFileSync(resolve(__dirname, "seed-data/customers.json"), "utf8"),
+  );
+
   const roomIds: string[] = [];
 
   for (let i = 0; i < roomEntries.length; i++) {
@@ -107,14 +123,18 @@ async function main() {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, ".")
       .replace(/^\.+|\.+$/g, "")}.${i + 1}@shoproom.seed`;
+    const ownerName = deriveOwnerName(i, pool);
 
-    // Shopkeeper
+    // Shopkeeper — `update` intentionally re-sets ownerName so re-running the
+    // seed backfills it onto already-existing rows instead of only setting
+    // it on first create.
     const sk = await prisma.shopkeeper.upsert({
       where: { email: skEmail },
-      update: {},
+      update: { ownerName },
       create: {
         email: skEmail,
         passwordHash: shopkeeperHash,
+        ownerName,
         shopName: r.shopName,
         shopCategory: r.category,
         address: r.address,
@@ -181,10 +201,8 @@ async function main() {
   console.log(`\n✅  ${roomEntries.length} rooms ready\n`);
 
   // ── 2. Customers ────────────────────────────────────────────────────────────
+  // (`pool` already loaded above, alongside §1, for owner-name derivation)
 
-  const pool: CustomerPool = JSON.parse(
-    readFileSync(resolve(__dirname, "seed-data/customers.json"), "utf8"),
-  );
   const { maleFirstNames, femaleFirstNames, surnames, total, locationPools } =
     pool;
 

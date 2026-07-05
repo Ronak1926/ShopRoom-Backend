@@ -1,5 +1,6 @@
 import "dotenv/config";
 
+import { createServer } from "http";
 import express from "express";
 import cors from "cors";
 
@@ -8,8 +9,10 @@ import { otpRouter } from "./routes/otp.js";
 import { shopkeeperRouter } from "./routes/shopkeeper.js";
 import { shopRouter } from "./routes/shop.js";
 import { roomsRouter } from "./routes/rooms.js";
+import { messagesRouter } from "./routes/messages.js";
 import { connectDatabase } from "./database/prisma.js";
 import { cleanupExpiredDrafts } from "./services/shopkeeper.service.js";
+import { createSocketServer } from "./realtime/socket.js";
 
 const app = express();
 
@@ -34,13 +37,19 @@ app.use("/api/otp", otpRouter);
 app.use("/api/shopkeeper", shopkeeperRouter);
 app.use("/api/shop", shopRouter);
 app.use("/api/rooms", roomsRouter);
+app.use("/api/rooms", messagesRouter);
+
+// Socket.IO needs the raw http.Server, so it's created explicitly instead of
+// via the implicit server app.listen() would otherwise create.
+const httpServer = createServer(app);
+createSocketServer(httpServer);
 
 connectDatabase().then(() => {
   // Clean up expired shopkeeper drafts on startup
   cleanupExpiredDrafts().catch(console.error);
 
   const port = process.env.PORT || 3000;
-  app.listen(port, () => {
+  httpServer.listen(port, () => {
     console.log(`Server started on port ${port}`);
   });
 });

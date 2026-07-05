@@ -4,6 +4,7 @@ import { parseBody } from "../utils/validate.js";
 import { signCustomerToken } from "../utils/jwt.js";
 import {
   getCustomerById,
+  getJoinedRooms,
   googleAuthCustomer,
   loginCustomer,
   registerCustomer,
@@ -108,9 +109,18 @@ export async function meCustomerHandler(req: Request, res: Response) {
   return res.json({ customer });
 }
 
+// ─── GET /api/customers/me/rooms ──────────────────────────────────────────────
+// Rooms the authenticated customer has joined. Auth: requireCustomerAuth.
+
+export async function meRoomsHandler(req: Request, res: Response) {
+  const customerId = req.customerId!;
+  const rooms = await getJoinedRooms(customerId);
+  return res.json({ rooms });
+}
+
 export async function loginCustomerHandler(req: Request, res: Response) {
   const parsed = parseBody<LoginCustomerDto>(req, loginCustomerSchema);
-  console.log("Parsed login data:", parsed);
+  // console.log("Parsed login data:", parsed);
   if (!parsed.ok) {
     return validationError(res, parsed.error);
   }

@@ -14,6 +14,7 @@
 
 import type { Request, Response } from "express";
 import { prisma } from "../database/prisma.js";
+import { assertRoomAccess, type SenderContext } from "../services/message.service.js";
 
 // ── Haversine distance (km) ────────────────────────────────────────────────────
 
@@ -80,7 +81,17 @@ export async function discoverRooms(
     },
   });
 
-  // 3. Build card objects with computed distance
+  // 3. Which of these rooms is the customer already a member of?
+  const memberships = await prisma.membership.findMany({
+    where: {
+      customerId,
+      roomId: { in: allRooms.map((r) => r.id) },
+    },
+    select: { roomId: true },
+  });
+  const joinedRoomIds = new Set(memberships.map((m) => m.roomId));
+
+  // 4. Build card objects with computed distance
   type RoomCard = {
     roomId: string;
     shopName: string;
@@ -93,6 +104,7 @@ export async function discoverRooms(
     distanceKm: number | null;
     likes: number;
     activeNow: boolean;
+    isJoined: boolean;
   };
 
   let cards: RoomCard[] = allRooms.map((room) => {
@@ -122,17 +134,18 @@ export async function discoverRooms(
       distanceKm,
       likes: 200, // static for now
       activeNow: true, // static for now
+      isJoined: joinedRoomIds.has(room.id),
     };
   });
 
-  // 4. Filter by category
+  // 5. Filter by category
   if (category && category !== "All") {
     cards = cards.filter(
       (c) => c.category.toLowerCase() === category.toLowerCase(),
     );
   }
 
-  // 5. Sort
+  // 6. Sort
   if (sort === "popular") {
     cards.sort((a, b) => b.membersCount - a.membersCount);
   } else {
@@ -145,7 +158,7 @@ export async function discoverRooms(
     });
   }
 
-  // 6. Trending — top 5 rooms by membersCount across ALL rooms (unfiltered)
+  // 7. Trending — top 5 rooms by membersCount across ALL rooms (unfiltered)
   const trending = [...allRooms]
     .sort((a, b) => b.membersCount - a.membersCount)
     .slice(0, 5)
@@ -157,7 +170,7 @@ export async function discoverRooms(
       membersCount: room.membersCount,
     }));
 
-  // 7. All distinct categories from DB
+  // 8. All distinct categories from DB
   const categoryRows = await prisma.shop.findMany({
     distinct: ["category"],
     select: { category: true },
@@ -283,4 +296,50 @@ export async function mapPins(req: Request, res: Response): Promise<void> {
   }
 
   res.json({ total: pins.length, pins });
+}
+
+// ── GET /api/rooms/:roomId ─────────────────────────────────────────────────────
+// Bootstrap data for a room's chat page — either a member customer or the
+// shop's own owner may fetch it. Auth: requireAnyAuth.
+
+export async function getRoomDetails(req: Request, res: Response): Promise<void> {
+  const { roomId } = req.params as { roomId: string };
+  const ctx: SenderContext = req.customerId
+    ? { customerId: req.customerId }
+    : { shopkeeperId: req.shopkeeperId! };
+
+  try {
+    await assertRoomAccess(roomId, ctx);
+  } catch (err: unknown) {
+    const e = err as Error;
+    if (e.message === "Room not found") {
+      res.status(404).json({ message: "Room not found" });
+      return;
+    }
+    res.status(403).json({ message: "You don't have access to this room" });
+    return;
+  }
+
+  const room = await prisma.room.findUnique({
+    where: { id: roomId },
+    select: {
+      id: true,
+      inviteCode: true,
+      membersCount: true,
+      shop: { select: { shopName: true, logoUrl: true, category: true } },
+    },
+  });
+  if (!room) {
+    res.status(404).json({ message: "Room not found" });
+    return;
+  }
+
+  res.json({
+    roomId: room.id,
+    shopName: room.shop.shopName,
+    logoUrl: room.shop.logoUrl,
+    category: room.shop.category,
+    membersCount: room.membersCount,
+    inviteCode: room.inviteCode,
+  });
 }

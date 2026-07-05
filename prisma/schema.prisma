@@ -29,7 +29,8 @@ model Customer {
   updatedAt           DateTime @updatedAt
 
   // Relations
-  memberships Membership[]
+  memberships  Membership[]
+  sentMessages Message[]    @relation("MessageCustomerSender")
 }
 
 model EmailOtp {
@@ -61,6 +62,7 @@ model Shopkeeper {
   id                String   @id @default(cuid())
   email             String   @unique
   passwordHash      String
+  ownerName         String?
   shopName          String
   shopCategory      String
   address           String
@@ -82,7 +84,8 @@ model Shopkeeper {
   updatedAt         DateTime @updatedAt
 
   // Relations
-  shop Shop?
+  shop         Shop?
+  sentMessages Message[] @relation("MessageShopkeeperSender")
 }
 
 model PhoneOtp {
@@ -141,6 +144,7 @@ model Room {
   inviteCode   String       @unique
   membersCount Int          @default(0)
   memberships  Membership[]
+  messages     Message[]
 
   // Media
   coverUrl String? // background/hero image for the room discover card
@@ -165,4 +169,29 @@ model Membership {
   @@unique([roomId, customerId])
   @@index([roomId])
   @@index([customerId])
+}
+
+enum MessageSenderType {
+  CUSTOMER
+  SHOPKEEPER
+}
+
+/// A chat message sent in a room, by either a customer member or the shop's
+/// owner (shopkeeper). Exactly one of customerId/shopkeeperId is set,
+/// matching senderType — there is no shared identity table between the two.
+model Message {
+  id     String @id @default(cuid())
+  roomId String
+  room   Room   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  senderType   MessageSenderType
+  customerId   String?
+  customer     Customer?   @relation("MessageCustomerSender", fields: [customerId], references: [id], onDelete: Cascade)
+  shopkeeperId String?
+  shopkeeper   Shopkeeper? @relation("MessageShopkeeperSender", fields: [shopkeeperId], references: [id], onDelete: Cascade)
+
+  text      String
+  createdAt DateTime @default(now())
+
+  @@index([roomId, createdAt])
 }

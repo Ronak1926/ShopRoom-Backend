@@ -12,6 +12,7 @@ import {
   joinRoom,
   leaveRoom,
 } from "../services/room.service.js";
+import { getIO } from "../realtime/socket.js";
 import { buildInviteLink } from "../utils/inviteCode.js";
 import { uploadImageToCloudinary } from "../lib/cloudinary.js";
 import type { GeoJsonPoint } from "../types/index.js";
@@ -352,6 +353,20 @@ export async function joinShopRoom(req: Request, res: Response): Promise<void> {
   try {
     const result = await joinRoom(code.toUpperCase(), customerId);
 
+    if (!result.alreadyMember && result.customerName) {
+      // Lets an already-open shopkeeper room view add the new member to its
+      // list live, instead of only appearing after a manual page refresh.
+      try {
+        getIO().to(result.roomId).emit("member:joined", {
+          roomId: result.roomId,
+          customerId,
+          customerName: result.customerName,
+        });
+      } catch {
+        // Socket.IO server not initialized (e.g. in a test harness) — fine to skip.
+      }
+    }
+
     res.status(result.alreadyMember ? 200 : 201).json({
       message: result.alreadyMember
         ? `You are already a member of ${result.shopName}`
@@ -383,6 +398,11 @@ export async function leaveShopRoom(
 
   try {
     await leaveRoom(roomId, customerId);
+    try {
+      getIO().to(roomId).emit("member:left", { roomId, customerId });
+    } catch {
+      // Socket.IO server not initialized (e.g. in a test harness) — fine to skip.
+    }
     res.json({ message: "Left the room" });
   } catch (err: unknown) {
     const e = err as Error;

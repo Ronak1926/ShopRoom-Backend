@@ -326,7 +326,20 @@ export async function getRoomDetails(req: Request, res: Response): Promise<void>
       id: true,
       inviteCode: true,
       membersCount: true,
-      shop: { select: { shopName: true, logoUrl: true, category: true } },
+      createdAt: true,
+      shop: {
+        select: {
+          shopName: true,
+          logoUrl: true,
+          category: true,
+          description: true,
+          address: true,
+          city: true,
+          state: true,
+          pincode: true,
+          phoneNumber: true,
+        },
+      },
     },
   });
   if (!room) {
@@ -339,7 +352,82 @@ export async function getRoomDetails(req: Request, res: Response): Promise<void>
     shopName: room.shop.shopName,
     logoUrl: room.shop.logoUrl,
     category: room.shop.category,
+    description: room.shop.description,
+    address: room.shop.address,
+    city: room.shop.city,
+    state: room.shop.state,
+    pincode: room.shop.pincode,
+    phoneNumber: room.shop.phoneNumber,
     membersCount: room.membersCount,
     inviteCode: room.inviteCode,
+    createdAt: room.createdAt.toISOString(),
+  });
+}
+
+// ── GET /api/rooms/:roomId/members ─────────────────────────────────────────────
+// Member list for a room's "Room Info" view — shared by both a member
+// customer and the shop's own owner. Auth: requireAnyAuth.
+
+export async function getRoomMembers(req: Request, res: Response): Promise<void> {
+  const { roomId } = req.params as { roomId: string };
+  const ctx: SenderContext = req.customerId
+    ? { customerId: req.customerId }
+    : { shopkeeperId: req.shopkeeperId! };
+
+  let shopLat: number | null;
+  let shopLng: number | null;
+  try {
+    ({ shopLat, shopLng } = await assertRoomAccess(roomId, ctx));
+  } catch (err: unknown) {
+    const e = err as Error;
+    if (e.message === "Room not found") {
+      res.status(404).json({ message: "Room not found" });
+      return;
+    }
+    res.status(403).json({ message: "You don't have access to this room" });
+    return;
+  }
+
+  const memberships = await prisma.membership.findMany({
+    where: { roomId },
+    orderBy: { joinedAt: "desc" },
+    select: {
+      joinedAt: true,
+      customer: {
+        select: {
+          id: true,
+          fullName: true,
+          allowLocationAccess: true,
+          latitude: true,
+          longitude: true,
+        },
+      },
+    },
+  });
+
+  res.json({
+    members: memberships.map((m) => {
+      let distanceKm: number | null = null;
+      if (
+        shopLat != null &&
+        shopLng != null &&
+        m.customer.allowLocationAccess &&
+        m.customer.latitude != null &&
+        m.customer.longitude != null
+      ) {
+        distanceKm =
+          Math.round(
+            haversineKm(shopLat, shopLng, m.customer.latitude, m.customer.longitude) *
+              10,
+          ) / 10;
+      }
+      return {
+        customerId: m.customer.id,
+        customerName: m.customer.fullName,
+        joinedAt: m.joinedAt.toISOString(),
+        distanceKm,
+      };
+    }),
+    total: memberships.length,
   });
 }

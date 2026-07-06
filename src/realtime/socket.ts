@@ -36,6 +36,12 @@ interface ServerToClientEvents {
     name: string;
     isTyping: boolean;
   }) => void;
+  "member:joined": (payload: {
+    roomId: string;
+    customerId: string;
+    customerName: string;
+  }) => void;
+  "member:left": (payload: { roomId: string; customerId: string }) => void;
   error: (payload: { message: string }) => void;
 }
 
@@ -102,6 +108,10 @@ let ioInstance: AppServer | null = null;
 export function createSocketServer(httpServer: HTTPServer): AppServer {
   const io: AppServer = new SocketIOServer(httpServer, {
     cors: { origin: true, credentials: true },
+    // Snappier stale-connection detection than the 25s/20s defaults, so a
+    // closed tab clears its "online" presence in seconds, not tens of seconds.
+    pingInterval: 10_000,
+    pingTimeout: 5_000,
   });
 
   io.use(async (socket, next) => {

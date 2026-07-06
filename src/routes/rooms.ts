@@ -11,6 +11,7 @@ import {
   discoverRooms,
   mapPins,
   getRoomDetails,
+  getRoomMembers,
 } from "../controllers/rooms.controller.js";
 
 export const roomsRouter = Router();
@@ -23,3 +24,6 @@ roomsRouter.get("/map-pins", requireCustomerAuth, mapPins);
 
 /** Room chat bootstrap data. Auth: customer or shopkeeper JWT. */
 roomsRouter.get("/:roomId", requireAnyAuth, getRoomDetails);
+
+/** Room member list, for the shared Room Info view. Auth: customer or shopkeeper JWT. */
+roomsRouter.get("/:roomId/members", requireAnyAuth, getRoomMembers);

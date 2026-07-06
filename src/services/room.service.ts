@@ -78,20 +78,26 @@ export async function getRoomByInviteCode(
 export async function joinRoom(
   inviteCode: string,
   customerId: string,
-): Promise<{ alreadyMember: boolean; roomId: string; shopName: string }> {
+): Promise<{
+  alreadyMember: boolean;
+  roomId: string;
+  shopName: string;
+  customerName?: string;
+}> {
+  // Single round trip: the existing-membership check rides along with the
+  // room lookup instead of a second sequential query.
   const room = await prisma.room.findUnique({
     where: { inviteCode },
-    include: { shop: { select: { shopName: true } } },
+    select: {
+      id: true,
+      shop: { select: { shopName: true } },
+      memberships: { where: { customerId }, select: { id: true }, take: 1 },
+    },
   });
 
   if (!room) throw new Error("Invite code not found");
 
-  // Check for existing membership
-  const existing = await prisma.membership.findUnique({
-    where: { roomId_customerId: { roomId: room.id, customerId } },
-  });
-
-  if (existing) {
+  if (room.memberships.length) {
     return {
       alreadyMember: true,
       roomId: room.id,
@@ -100,9 +106,10 @@ export async function joinRoom(
   }
 
   // Create membership + increment counter in a single transaction
-  await prisma.$transaction([
+  const [membership] = await prisma.$transaction([
     prisma.membership.create({
       data: { roomId: room.id, customerId },
+      select: { customer: { select: { fullName: true } } },
     }),
     prisma.room.update({
       where: { id: room.id },
@@ -114,6 +121,7 @@ export async function joinRoom(
     alreadyMember: false,
     roomId: room.id,
     shopName: room.shop.shopName,
+    customerName: membership.customer.fullName,
   };
 }
 

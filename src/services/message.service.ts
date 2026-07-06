@@ -9,6 +9,7 @@
 
 import { prisma } from "../database/prisma.js";
 import type { MessageSenderType } from "../generated/client.js";
+import { encryptText, decryptText } from "../utils/crypto.js";
 
 export type SenderContext =
   | { customerId: string; shopkeeperId?: undefined }
@@ -37,23 +38,33 @@ export interface MessageDTO {
 export async function assertRoomAccess(
   roomId: string,
   ctx: SenderContext,
-): Promise<{ shopId: string }> {
+): Promise<{ shopId: string; shopLat: number | null; shopLng: number | null }> {
+  // Single round trip: the membership existence check (customer path) rides
+  // along with the room/shop lookup instead of a second sequential query.
   const room = await prisma.room.findUnique({
     where: { id: roomId },
-    select: { shop: { select: { id: true, ownerId: true } } },
+    select: {
+      shop: {
+        select: { id: true, ownerId: true, latitude: true, longitude: true },
+      },
+      memberships: ctx.customerId
+        ? { where: { customerId: ctx.customerId }, select: { id: true }, take: 1 }
+        : false,
+    },
   });
   if (!room) throw new Error("Room not found");
 
   if (ctx.customerId) {
-    const membership = await prisma.membership.findUnique({
-      where: { roomId_customerId: { roomId, customerId: ctx.customerId } },
-    });
-    if (!membership) throw new Error("Access denied");
+    if (!room.memberships?.length) throw new Error("Access denied");
   } else if (room.shop.ownerId !== ctx.shopkeeperId) {
     throw new Error("Access denied");
   }
 
-  return { shopId: room.shop.id };
+  return {
+    shopId: room.shop.id,
+    shopLat: room.shop.latitude,
+    shopLng: room.shop.longitude,
+  };
 }
 
 function toDTO(row: {
@@ -78,7 +89,7 @@ function toDTO(row: {
     id: row.id,
     roomId: row.roomId,
     senderType: row.senderType,
-    text: row.text,
+    text: decryptText(row.text),
     createdAt: row.createdAt.toISOString(),
     sender,
   };
@@ -106,7 +117,7 @@ export async function createMessage(
   const row = await prisma.message.create({
     data: {
       roomId,
-      text,
+      text: encryptText(text),
       senderType: ctx.customerId ? "CUSTOMER" : "SHOPKEEPER",
       customerId: ctx.customerId ?? null,
       shopkeeperId: ctx.shopkeeperId ?? null,

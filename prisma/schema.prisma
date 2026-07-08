@@ -29,8 +29,10 @@ model Customer {
   updatedAt           DateTime @updatedAt
 
   // Relations
-  memberships  Membership[]
-  sentMessages Message[]    @relation("MessageCustomerSender")
+  memberships     Membership[]
+  sentMessages    Message[]         @relation("MessageCustomerSender")
+  messageReactions MessageReaction[]
+  roomViewerStates RoomViewerState[]
 }
 
 model EmailOtp {
@@ -84,8 +86,10 @@ model Shopkeeper {
   updatedAt         DateTime @updatedAt
 
   // Relations
-  shop         Shop?
-  sentMessages Message[] @relation("MessageShopkeeperSender")
+  shop             Shop?
+  sentMessages     Message[]         @relation("MessageShopkeeperSender")
+  messageReactions MessageReaction[]
+  roomViewerStates RoomViewerState[]
 }
 
 model PhoneOtp {
@@ -145,6 +149,7 @@ model Room {
   membersCount Int          @default(0)
   memberships  Membership[]
   messages     Message[]
+  viewerStates RoomViewerState[]
 
   // Media
   coverUrl String? // background/hero image for the room discover card
@@ -193,5 +198,70 @@ model Message {
   text      String
   createdAt DateTime @default(now())
 
+  editedAt           DateTime?
+  deletedForEveryone Boolean   @default(false)
+
+  replyToId String?
+  replyTo   Message?  @relation("MessageReplyTo", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   Message[] @relation("MessageReplyTo")
+
+  reactions MessageReaction[]
+  hiddenFor MessageHiddenFor[]
+
   @@index([roomId, createdAt])
+}
+
+/// One reaction per participant per message — keyed by viewerKey
+/// (customerId, or "SK:<shopkeeperId>") since a message can be reacted to by
+/// either a customer member or the shop's own owner. Re-reacting with the
+/// same emoji removes it (toggle); a different emoji replaces it.
+model MessageReaction {
+  id           String  @id @default(cuid())
+  messageId    String
+  message      Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  viewerKey    String
+  customerId   String?
+  customer     Customer?   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  shopkeeperId String?
+  shopkeeper   Shopkeeper? @relation(fields: [shopkeeperId], references: [id], onDelete: Cascade)
+  emoji        String
+
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, viewerKey])
+  @@index([messageId])
+}
+
+/// "Delete for me" — hides a single message from one participant's own view
+/// without touching the shared row. Keyed by the same viewerKey convention.
+model MessageHiddenFor {
+  id        String  @id @default(cuid())
+  messageId String
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  viewerKey String
+
+  @@unique([messageId, viewerKey])
+  @@index([messageId])
+}
+
+/// One row per (room, participant) — a room-level read cursor (not
+/// per-message tick receipts, which would scale as messages x members)
+/// used to gate the edit/delete-for-everyone "seen" rule, plus the
+/// "cleared at" boundary for that participant's own Clear Chat.
+model RoomViewerState {
+  id           String  @id @default(cuid())
+  roomId       String
+  room         Room    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  viewerKey    String
+  customerId   String?
+  customer     Customer?   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  shopkeeperId String?
+  shopkeeper   Shopkeeper? @relation(fields: [shopkeeperId], references: [id], onDelete: Cascade)
+
+  lastReadAt DateTime?
+  clearedAt  DateTime?
+  updatedAt  DateTime @updatedAt
+
+  @@unique([roomId, viewerKey])
+  @@index([roomId, lastReadAt])
 }

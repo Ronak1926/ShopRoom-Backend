@@ -61,7 +61,7 @@ export async function getRoomMessages(
 
   if (!(await checkAccess(roomId, ctx, res))) return;
 
-  const result = await getMessages(roomId, { page, limit });
+  const result = await getMessages(roomId, { page, limit }, ctx);
   res.json(result);
 }
 

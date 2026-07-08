@@ -18,6 +18,13 @@ import { prisma } from "../database/prisma.js";
 import {
   assertRoomAccess,
   createMessage,
+  editMessage,
+  deleteMessage,
+  reactToMessage,
+  markRoomRead,
+  getUnseenOwnEligibleMessages,
+  clearRoomForViewer,
+  viewerKeyOf,
   type MessageDTO,
   type SenderContext,
 } from "../services/message.service.js";
@@ -26,6 +33,16 @@ import {
 
 interface ServerToClientEvents {
   "message:new": (message: MessageDTO) => void;
+  "message:updated": (message: MessageDTO) => void;
+  "message:deleted": (payload: { roomId: string; messageId: string }) => void;
+  "message:removed": (payload: { roomId: string; messageId: string }) => void;
+  "message:reacted": (payload: {
+    roomId: string;
+    messageId: string;
+    reactions: MessageDTO["reactions"];
+  }) => void;
+  "message:seen": (payload: { roomId: string; messageIds: string[] }) => void;
+  "chat:cleared": (payload: { roomId: string; clearedAt: string }) => void;
   "presence:update": (payload: {
     roomId: string;
     onlineCustomerIds: string[];
@@ -48,7 +65,20 @@ interface ServerToClientEvents {
 interface ClientToServerEvents {
   "room:join": (payload: { roomId: string }) => void;
   "room:leave": (payload: { roomId: string }) => void;
-  "message:send": (payload: { roomId: string; text: string }) => void;
+  "room:read": (payload: { roomId: string; at: string }) => void;
+  "message:send": (payload: {
+    roomId: string;
+    text: string;
+    replyToId?: string;
+  }) => void;
+  "message:edit": (payload: { roomId: string; messageId: string; text: string }) => void;
+  "message:delete": (payload: {
+    roomId: string;
+    messageId: string;
+    scope: "everyone" | "me";
+  }) => void;
+  "message:react": (payload: { roomId: string; messageId: string; emoji: string }) => void;
+  "chat:clear": (payload: { roomId: string }) => void;
   "typing:start": (payload: { roomId: string }) => void;
   "typing:stop": (payload: { roomId: string }) => void;
 }
@@ -99,6 +129,14 @@ function emitPresence(io: AppServer, roomId: string) {
 
 function senderIdOf(data: SocketData): string {
   return (data.customerId ?? data.shopkeeperId)!;
+}
+
+/** The personal room every socket joins on connection, keyed by the same
+ * viewerKey convention used throughout message.service.ts — lets the server
+ * push events to "this participant, wherever they're connected" (handles
+ * multiple tabs/reconnects for free) without broadcasting to the whole room. */
+function personalRoom(viewerKey: string): string {
+  return `user:${viewerKey}`;
 }
 
 // ── Server ─────────────────────────────────────────────────────────────────────
@@ -158,6 +196,9 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
     const ctx: SenderContext = socket.data.customerId
       ? { customerId: socket.data.customerId }
       : { shopkeeperId: socket.data.shopkeeperId! };
+    const myViewerKey = viewerKeyOf(ctx);
+
+    socket.join(personalRoom(myViewerKey));
 
     function stopTyping(roomId: string) {
       if (!socket.data.typingRooms.has(roomId)) return;
@@ -184,6 +225,17 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
         presenceByRoom.get(roomId)!.add(socket.data.customerId);
         emitPresence(io, roomId);
       }
+
+      // Catch this participant's own client up on any of their messages
+      // that became ineligible for edit/delete while they were disconnected.
+      try {
+        const alreadySeenIds = await getUnseenOwnEligibleMessages(roomId, ctx);
+        if (alreadySeenIds.length) {
+          socket.emit("message:seen", { roomId, messageIds: alreadySeenIds });
+        }
+      } catch {
+        // best-effort — not worth failing the join over
+      }
     });
 
     socket.on("room:leave", ({ roomId }) => {
@@ -196,7 +248,7 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
       stopTyping(roomId);
     });
 
-    socket.on("message:send", async ({ roomId, text }) => {
+    socket.on("message:send", async ({ roomId, text, replyToId }) => {
       if (!roomId || typeof text !== "string") return;
       const trimmed = text.trim();
       if (!trimmed || trimmed.length > 2000) {
@@ -213,10 +265,97 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
       }
       try {
         await assertRoomAccess(roomId, ctx);
-        const message = await createMessage(roomId, trimmed, ctx);
+        const message = await createMessage(roomId, trimmed, ctx, replyToId);
         io.to(roomId).emit("message:new", message);
       } catch {
         socket.emit("error", { message: "Could not send message" });
+      }
+    });
+
+    socket.on("message:edit", async ({ roomId, messageId, text }) => {
+      if (!roomId || !messageId || typeof text !== "string") return;
+      const trimmed = text.trim();
+      if (!trimmed || trimmed.length > 2000) {
+        socket.emit("error", { message: "Message must be 1-2000 characters" });
+        return;
+      }
+      if (isRateLimited(socket.id)) {
+        socket.emit("error", { message: "You're sending messages too fast" });
+        return;
+      }
+      try {
+        await assertRoomAccess(roomId, ctx);
+        const updated = await editMessage(messageId, trimmed, ctx);
+        io.to(roomId).emit("message:updated", updated);
+      } catch (err) {
+        socket.emit("error", {
+          message: err instanceof Error ? err.message : "Could not edit message",
+        });
+      }
+    });
+
+    socket.on("message:delete", async ({ roomId, messageId, scope }) => {
+      if (!roomId || !messageId || (scope !== "everyone" && scope !== "me")) return;
+      if (isRateLimited(socket.id)) {
+        socket.emit("error", { message: "You're sending messages too fast" });
+        return;
+      }
+      try {
+        await assertRoomAccess(roomId, ctx);
+        await deleteMessage(messageId, scope, ctx);
+        if (scope === "everyone") {
+          io.to(roomId).emit("message:deleted", { roomId, messageId });
+        } else {
+          socket.emit("message:removed", { roomId, messageId });
+        }
+      } catch (err) {
+        socket.emit("error", {
+          message: err instanceof Error ? err.message : "Could not delete message",
+        });
+      }
+    });
+
+    socket.on("message:react", async ({ roomId, messageId, emoji }) => {
+      if (!roomId || !messageId || typeof emoji !== "string" || !emoji) return;
+      if (isRateLimited(socket.id)) {
+        socket.emit("error", { message: "You're sending messages too fast" });
+        return;
+      }
+      try {
+        await assertRoomAccess(roomId, ctx);
+        const reactions = await reactToMessage(messageId, emoji, ctx);
+        io.to(roomId).emit("message:reacted", { roomId, messageId, reactions });
+      } catch {
+        socket.emit("error", { message: "Could not react to message" });
+      }
+    });
+
+    socket.on("room:read", async ({ roomId, at }) => {
+      if (!roomId || !at) return;
+      const atDate = new Date(at);
+      if (Number.isNaN(atDate.getTime())) return;
+      try {
+        await assertRoomAccess(roomId, ctx);
+        const newlySeen = await markRoomRead(roomId, ctx, atDate);
+        for (const { senderViewerKey, messageIds } of newlySeen) {
+          io.to(personalRoom(senderViewerKey)).emit("message:seen", {
+            roomId,
+            messageIds,
+          });
+        }
+      } catch {
+        // best-effort — read receipts aren't worth surfacing an error toast
+      }
+    });
+
+    socket.on("chat:clear", async ({ roomId }) => {
+      if (!roomId) return;
+      try {
+        await assertRoomAccess(roomId, ctx);
+        const clearedAt = await clearRoomForViewer(roomId, ctx);
+        socket.emit("chat:cleared", { roomId, clearedAt: clearedAt.toISOString() });
+      } catch {
+        socket.emit("error", { message: "Could not clear chat" });
       }
     });
 

@@ -8,6 +8,7 @@ import {
   googleAuthCustomer,
   loginCustomer,
   registerCustomer,
+  updateCustomer,
 } from "../services/customers.service.js";
 import { firebaseAuth } from "../lib/firebaseAdmin.js";
 
@@ -107,6 +108,27 @@ export async function meCustomerHandler(req: Request, res: Response) {
     return res.status(404).json({ message: "Customer not found" });
   }
   return res.json({ customer });
+}
+
+const updateCustomerSchema = z.object({
+  fullName: z.string().trim().min(2).max(120).optional(),
+  allowLocationAccess: z.boolean().optional(),
+});
+
+type UpdateCustomerDto = z.infer<typeof updateCustomerSchema>;
+
+// ─── PATCH /api/customers/me ───────────────────────────────────────────────────
+// Body: { fullName?, allowLocationAccess? }. Auth: requireCustomerAuth.
+
+export async function updateCustomerHandler(req: Request, res: Response) {
+  const customerId = req.customerId!;
+  const parsed = parseBody<UpdateCustomerDto>(req, updateCustomerSchema);
+  if (!parsed.ok) {
+    return validationError(res, parsed.error);
+  }
+
+  const customer = await updateCustomer(customerId, parsed.data);
+  return res.json({ customer, message: "Profile updated" });
 }
 
 // ─── GET /api/customers/me/rooms ──────────────────────────────────────────────

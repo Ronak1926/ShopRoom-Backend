@@ -6,6 +6,7 @@
  */
 
 import type { Request, Response } from "express";
+import z from "zod";
 import { prisma } from "../database/prisma.js";
 import {
   getRoomByInviteCode,
@@ -15,6 +16,7 @@ import {
 import { getIO } from "../realtime/socket.js";
 import { buildInviteLink } from "../utils/inviteCode.js";
 import { uploadImageToCloudinary } from "../lib/cloudinary.js";
+import { parseBody } from "../utils/validate.js";
 import type { GeoJsonPoint } from "../types/index.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -246,6 +248,7 @@ export async function getShopProfile(
       select: {
         id: true,
         email: true,
+        ownerName: true,
         planType: true,
         planExpiresAt: true,
         createdAt: true,
@@ -288,6 +291,7 @@ export async function getShopProfile(
     shopkeeper: {
       id: shopkeeper.id,
       email: shopkeeper.email,
+      ownerName: shopkeeper.ownerName ?? null,
       createdAt: shopkeeper.createdAt.toISOString(),
     },
     shop: {
@@ -317,6 +321,73 @@ export async function getShopProfile(
         }
       : null,
   });
+}
+
+const updateShopProfileSchema = z.object({
+  shopName: z.string().trim().min(2).max(120).optional(),
+  category: z.string().trim().min(2).max(60).optional(),
+  description: z.string().trim().max(1000).optional(),
+  address: z.string().trim().min(2).max(200).optional(),
+  city: z.string().trim().min(2).max(100).optional(),
+  state: z.string().trim().min(2).max(100).optional(),
+  pincode: z.string().trim().min(3).max(12).optional(),
+  phoneNumber: z.string().trim().min(7).max(20).optional(),
+  ownerName: z.string().trim().min(2).max(120).optional(),
+});
+
+type UpdateShopProfileDto = z.infer<typeof updateShopProfileSchema>;
+
+// ─── PATCH /api/shop/profile ───────────────────────────────────────────────────
+// Body: shop fields + ownerName, all optional. Auth: requireShopkeeperAuth.
+// Shop and Shopkeeper live in separate tables — updated together in one
+// transaction so a partial write never leaves them inconsistent.
+
+export async function updateShopProfile(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const shopkeeperId = req.shopkeeperId!;
+  const parsed = parseBody<UpdateShopProfileDto>(req, updateShopProfileSchema);
+  if (!parsed.ok) {
+    res.status(400).json({
+      message: "Validation error",
+      issues: parsed.error.issues.map((i) => ({ path: i.path, message: i.message })),
+    });
+    return;
+  }
+
+  const { ownerName, ...shopFields } = parsed.data;
+
+  try {
+    // An empty `data: {}` is a valid no-op update, so both calls can run
+    // unconditionally in one transaction regardless of which fields were sent.
+    const [shop, shopkeeper] = await prisma.$transaction([
+      prisma.shop.update({ where: { ownerId: shopkeeperId }, data: shopFields }),
+      prisma.shopkeeper.update({
+        where: { id: shopkeeperId },
+        data: ownerName !== undefined ? { ownerName } : {},
+      }),
+    ]);
+
+    res.json({
+      message: "Profile updated",
+      shop: {
+        shopName: shop.shopName,
+        category: shop.category,
+        description: shop.description ?? null,
+        address: shop.address,
+        city: shop.city,
+        state: shop.state,
+        pincode: shop.pincode,
+        phoneNumber: shop.phoneNumber,
+      },
+      ownerName: shopkeeper.ownerName ?? null,
+    });
+  } catch (err: unknown) {
+    const e = err as Error;
+    console.error("[shop] updateShopProfile:", e.message);
+    res.status(500).json({ message: "Failed to update profile" });
+  }
 }
 
 // ─── GET /api/shop/invite/:code ───────────────────────────────────────────────

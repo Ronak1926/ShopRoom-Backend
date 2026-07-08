@@ -21,6 +21,7 @@ import {
   joinShopRoom,
   leaveShopRoom,
   updateRoomImages,
+  updateShopProfile,
 } from "../controllers/shop.controller.js";
 
 export const shopRouter = Router();
@@ -35,6 +36,9 @@ shopRouter.get("/dashboard", requireShopkeeperAuth, getShopDashboard);
 
 /** Returns full profile data: shopkeeper account + shop details + plan + room stats. */
 shopRouter.get("/profile", requireShopkeeperAuth, getShopProfile);
+
+/** Updates editable shop fields and/or the shopkeeper's ownerName. */
+shopRouter.patch("/profile", requireShopkeeperAuth, updateShopProfile);
 
 /** Returns paginated room members. Query: page (0-based), limit (default 10). */
 shopRouter.get("/members", requireShopkeeperAuth, getShopMembers);

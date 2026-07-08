@@ -75,6 +75,32 @@ export async function registerCustomer(input: {
   return { ok: true as const, customer: toSafeCustomer(customer) };
 }
 
+export async function updateCustomer(
+  id: string,
+  input: { fullName?: string; allowLocationAccess?: boolean },
+): Promise<CustomerSafe> {
+  const customer = await prisma.customer.update({
+    where: { id },
+    data: {
+      ...(input.fullName !== undefined ? { fullName: input.fullName } : {}),
+      ...(input.allowLocationAccess !== undefined
+        ? { allowLocationAccess: input.allowLocationAccess }
+        : {}),
+    },
+    select: {
+      id: true,
+      fullName: true,
+      email: true,
+      allowLocationAccess: true,
+      latitude: true,
+      longitude: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+  return toSafeCustomer(customer);
+}
+
 export async function getCustomerById(id: string) {
   const cusomer = await prisma.customer.findUnique({
     where: { id },

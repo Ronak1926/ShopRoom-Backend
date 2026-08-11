@@ -5,11 +5,17 @@
  *   Auth     : customer JWT
  *   Query    : ?category=Clothing  (optional)
  *              ?sort=nearest|popular  (default: nearest)
- *   Response : { total, rooms[], trending[], categories[] }
+ *              ?page=0  (0-based, default 0)
+ *              ?limit=30  (default 30, max 30)
+ *   Response : { total, page, limit, totalPages, rooms[], trending[], categories[] }
  *
  * Distance is computed server-side with the Haversine formula using
  * the authenticated customer's stored lat/lng.  If the customer has
  * not granted location access, distanceKm is null for every card.
+ *
+ * Rooms are ranked in-process (distance/popularity aren't DB columns),
+ * so pagination is applied to the sorted in-memory list rather than
+ * via Prisma `skip`/`take`.
  */
 
 import type { Request, Response } from "express";
@@ -45,6 +51,15 @@ export async function discoverRooms(
     category?: string;
     sort?: string;
   };
+
+  const page = Math.max(
+    0,
+    parseInt((req.query.page as string) ?? "0", 10) || 0,
+  );
+  const limit = Math.min(
+    30,
+    Math.max(1, parseInt((req.query.limit as string) ?? "30", 10) || 30),
+  );
 
   // 1. Fetch authenticated customer's location
   const customer = await prisma.customer.findUnique({
@@ -158,7 +173,11 @@ export async function discoverRooms(
     });
   }
 
-  // 7. Trending — top 5 rooms by membersCount across ALL rooms (unfiltered)
+  // 7. Paginate the sorted/filtered list
+  const total = cards.length;
+  const pagedCards = cards.slice(page * limit, page * limit + limit);
+
+  // 8. Trending — top 5 rooms by membersCount across ALL rooms (unfiltered)
   const trending = [...allRooms]
     .sort((a, b) => b.membersCount - a.membersCount)
     .slice(0, 5)
@@ -170,7 +189,7 @@ export async function discoverRooms(
       membersCount: room.membersCount,
     }));
 
-  // 8. All distinct categories from DB
+  // 9. All distinct categories from DB
   const categoryRows = await prisma.shop.findMany({
     distinct: ["category"],
     select: { category: true },
@@ -179,8 +198,11 @@ export async function discoverRooms(
   const categories = categoryRows.map((r) => r.category);
 
   res.json({
-    total: cards.length,
-    rooms: cards,
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+    rooms: pagedCards,
     trending,
     categories,
   });

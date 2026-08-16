@@ -22,7 +22,7 @@ import { prisma } from "../database/prisma.js";
  * Prevents raw Prisma / DB error details from leaking to the client.
  * Prisma errors carry a name like "PrismaClientValidationError" or a P-code.
  */
-function safeMessage(
+export function safeMessage(
   err: unknown,
   fallback = "Something went wrong. Please try again.",
 ): string {

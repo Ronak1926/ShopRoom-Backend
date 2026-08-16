@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import bcrypt from "bcrypt";
 import { PrismaClient } from "../src/generated/client.js";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { seedNotifications } from "./notificationSeed.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -297,6 +298,10 @@ async function main() {
   }
 
   console.log(`✅  ${memberships.length} memberships ready\n`);
+
+  // Notification catalog: categories, animations, starter templates.
+  await seedNotifications(prisma);
+
   console.log("🎉  Seeding complete!");
   console.log("    Shopkeeper password : Shopkeeper@123");
   console.log("    Customer password   : Customer@123");

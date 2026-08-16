@@ -10,6 +10,7 @@ import { shopkeeperRouter } from "./routes/shopkeeper.js";
 import { shopRouter } from "./routes/shop.js";
 import { roomsRouter } from "./routes/rooms.js";
 import { messagesRouter } from "./routes/messages.js";
+import { notificationsRouter } from "./routes/notifications.js";
 import { connectDatabase } from "./database/prisma.js";
 import { cleanupExpiredDrafts } from "./services/shopkeeper.service.js";
 import { createSocketServer } from "./realtime/socket.js";
@@ -38,6 +39,7 @@ app.use("/api/shopkeeper", shopkeeperRouter);
 app.use("/api/shop", shopRouter);
 app.use("/api/rooms", roomsRouter);
 app.use("/api/rooms", messagesRouter);
+app.use("/api/notifications", notificationsRouter);
 
 // Socket.IO needs the raw http.Server, so it's created explicitly instead of
 // via the implicit server app.listen() would otherwise create.

@@ -55,3 +55,46 @@ export async function uploadLogoToCloudinary(
 ): Promise<string> {
   return uploadImageToCloudinary(base64DataUri, "shoproom/logos");
 }
+
+export interface CloudinaryAsset {
+  publicId: string;
+  secureUrl: string;
+  width: number;
+  height: number;
+  bytes: number;
+  format: string;
+}
+
+/**
+ * Uploads a notification image asset and returns its full metadata
+ * (publicId + dimensions + size) so it can be persisted in NotificationAsset.
+ */
+export async function uploadNotificationAssetToCloudinary(
+  base64DataUri: string,
+): Promise<CloudinaryAsset> {
+  const { apiKey, apiSecret } = configureCloudinary();
+  const folder = "shoproom/notifications";
+  const timestamp = Math.round(Date.now() / 1000);
+
+  const paramStr = `folder=${folder}&timestamp=${timestamp}`;
+  const signature = createHash("sha1")
+    .update(paramStr + apiSecret)
+    .digest("hex");
+
+  const result = await cloudinary.uploader.upload(base64DataUri, {
+    folder,
+    timestamp,
+    signature,
+    api_key: apiKey,
+    resource_type: "image",
+  });
+
+  return {
+    publicId: result.public_id,
+    secureUrl: result.secure_url,
+    width: result.width,
+    height: result.height,
+    bytes: result.bytes,
+    format: result.format,
+  };
+}

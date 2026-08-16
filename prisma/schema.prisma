@@ -7,14 +7,6 @@ datasource db {
   provider = "postgresql"
 }
 
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
 model Customer {
   id                  String   @id @default(cuid())
   fullName            String
@@ -86,21 +78,12 @@ model Shopkeeper {
   updatedAt         DateTime @updatedAt
 
   // Relations
-  shop             Shop?
-  sentMessages     Message[]         @relation("MessageShopkeeperSender")
-  messageReactions MessageReaction[]
-  roomViewerStates RoomViewerState[]
-}
-
-model PhoneOtp {
-  id          String   @id @default(cuid())
-  phoneNumber String
-  code        String
-  expiresAt   DateTime
-  used        Boolean  @default(false)
-  createdAt   DateTime @default(now())
-
-  @@index([phoneNumber])
+  shop                Shop?
+  sentMessages        Message[]            @relation("MessageShopkeeperSender")
+  messageReactions    MessageReaction[]
+  roomViewerStates    RoomViewerState[]
+  notificationDesigns NotificationDesign[]
+  notificationAssets  NotificationAsset[]
 }
 
 // ─── Shop / Room ──────────────────────────────────────────────────────────────
@@ -264,4 +247,136 @@ model RoomViewerState {
 
   @@unique([roomId, viewerKey])
   @@index([roomId, lastReadAt])
+}
+
+// ─── Customizable Notifications ─────────────────────────────────────────────────
+// A notification is a data-driven design document (designJson), not a hard-coded
+// component. ShopRoom templates and shopkeeper custom notifications are the same
+// kind of object once they enter the rendering pipeline.
+
+enum NotificationDesignStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum NotificationAnimationCategory {
+  ENTRY
+  ATTENTION
+  CLICK
+  EXIT
+}
+
+/// Semantic notification type catalog (New Arrival, Flash Sale, …).
+model NotificationCategory {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  name      String
+  icon      String?
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  templates NotificationTemplate[]
+  designs   NotificationDesign[]
+
+  @@index([isActive])
+}
+
+/// ShopRoom-provided starting design. Cloned into a shopkeeper-owned design.
+model NotificationTemplate {
+  id            String  @id @default(cuid())
+  slug          String  @unique
+  name          String
+  categoryId    String
+  category      NotificationCategory @relation(fields: [categoryId], references: [id])
+  designJson    Json
+  thumbnailUrl  String?
+  schemaVersion Int     @default(1)
+  requiredPlan  String? // null = available on every plan; else "1m" | "2m" | "3m"
+  isActive      Boolean @default(true)
+  sortOrder     Int     @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  designs NotificationDesign[]
+
+  @@index([categoryId])
+  @@index([isActive])
+}
+
+/// Shopkeeper-owned editable design.
+model NotificationDesign {
+  id               String                   @id @default(cuid())
+  shopkeeperId     String
+  shopkeeper       Shopkeeper               @relation(fields: [shopkeeperId], references: [id], onDelete: Cascade)
+  sourceTemplateId String?
+  sourceTemplate   NotificationTemplate?    @relation(fields: [sourceTemplateId], references: [id], onDelete: SetNull)
+  categoryId       String?
+  category         NotificationCategory?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  name             String
+  status           NotificationDesignStatus @default(DRAFT)
+  designJson       Json
+  schemaVersion    Int                      @default(1)
+  version          Int                      @default(1)
+  isArchived       Boolean                  @default(false)
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  versions NotificationDesignVersion[]
+
+  @@index([shopkeeperId])
+  @@index([shopkeeperId, isArchived])
+  @@index([categoryId])
+}
+
+/// Immutable snapshot for restore/rollback. Written on explicit save-version.
+model NotificationDesignVersion {
+  id         String   @id @default(cuid())
+  designId   String
+  design     NotificationDesign @relation(fields: [designId], references: [id], onDelete: Cascade)
+  version    Int
+  designJson Json
+  createdBy  String // shopkeeperId that created the snapshot
+  createdAt  DateTime @default(now())
+
+  @@unique([designId, version])
+  @@index([designId])
+}
+
+/// Reusable animation catalog. The DB stores identity + safe params; the client
+/// owns the Framer Motion implementation.
+model NotificationAnimation {
+  id           String                        @id @default(cuid())
+  slug         String                        @unique
+  name         String
+  type         String // e.g. FADE_IN, SLIDE_UP
+  category     NotificationAnimationCategory
+  configSchema Json? // default/allowed params
+  requiredPlan String? // null = every plan
+  previewUrl   String?
+  isActive     Boolean                       @default(true)
+  sortOrder    Int                           @default(0)
+  createdAt    DateTime                      @default(now())
+  updatedAt    DateTime                      @updatedAt
+
+  @@index([category])
+  @@index([isActive])
+}
+
+/// Image/media uploaded by a shopkeeper. designJson stores only the reference.
+model NotificationAsset {
+  id                 String   @id @default(cuid())
+  shopkeeperId       String
+  shopkeeper         Shopkeeper @relation(fields: [shopkeeperId], references: [id], onDelete: Cascade)
+  cloudinaryPublicId String
+  secureUrl          String
+  width              Int?
+  height             Int?
+  mimeType           String?
+  sizeBytes          Int?
+  createdAt          DateTime @default(now())
+
+  @@index([shopkeeperId])
 }

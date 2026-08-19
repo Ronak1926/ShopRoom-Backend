@@ -31,7 +31,7 @@ export const NotificationTypeSchema = z.enum(NOTIFICATION_TYPES);
 /** Element registry — the complete set of renderable node types. */
 export const NODE_TYPES = [
   "GROUP", "CONTAINER", "TEXT", "RICH_TEXT", "VARIABLE_TEXT",
-  "IMAGE", "PRODUCT_IMAGE", "ICON", "BADGE", "BUTTON",
+  "IMAGE", "PRODUCT_IMAGE", "ICON", "BADGE", "LABEL", "BUTTON",
   "SHAPE", "DIVIDER", "SPARKLE", "CIRCLE", "RECTANGLE", "LINE", "GRADIENT",
   "STOCK", "DISCOUNT", "PRICE", "OLD_PRICE", "PRODUCT_NAME", "PRODUCT_DESCRIPTION",
   "RATING", "TIMER", "PROGRESS_BAR", "AVATAR", "LOGO", "SOCIAL_PROOF",
@@ -157,16 +157,27 @@ export const StyleSchema = z.object({
   textAlign: z.enum(["left", "center", "right", "justify"]).optional(),
   textTransform: z.enum(["none", "uppercase", "lowercase", "capitalize"]).optional(),
   textDecoration: z.enum(["none", "underline", "line-through"]).optional(),
+  whiteSpace: z.enum(["normal", "nowrap"]).optional(),
+  verticalAlign: z.enum(["top", "center", "bottom"]).optional(),
   maxLines: z.number().int().min(1).max(50).optional(),
-  overflow: z.enum(["visible", "hidden", "ellipsis"]).optional(),
+  overflow: z.enum(["visible", "hidden", "clip", "ellipsis"]).optional(),
   textShadow: ShadowSchema.optional(),
   gradientText: GradientSchema.optional(),
   borderRadius: num.min(0).max(9999).optional(),
   border: BorderSchema.optional(),
   padding: PaddingSchema.optional(),
   shadow: ShadowSchema.optional(),
+  glow: z.object({
+    enabled: z.boolean().default(true),
+    color: colorString.default("#7C6AE8"),
+    blur: num.min(0).max(200).default(16),
+    opacity: num.min(0).max(1).default(0.6),
+  }).optional(),
   blur: num.min(0).max(400).optional(),
   backdropBlur: num.min(0).max(400).optional(),
+  // Generic shape clip for badge/label (and future) nodes — a pill/circle/hexagon/
+  // diamond/shield/star/burst silhouette applied via CSS clip-path.
+  clipShape: z.enum(["pill", "circle", "hexagon", "diamond", "shield", "star", "burst"]).optional(),
 });
 
 export const ContentSchema = z.object({
@@ -175,6 +186,8 @@ export const ContentSchema = z.object({
   variable: z.string().max(120).optional(),
   label: z.string().max(200).optional(),
   icon: z.string().max(64).optional(),
+  iconPosition: z.enum(["left", "right", "only", "none"]).optional(),
+  iconSize: num.min(4).max(200).optional(),
   value: z.union([z.string().max(200), num]).optional(),
   endAt: z.string().datetime().optional(),
   rating: num.min(0).max(5).optional(),

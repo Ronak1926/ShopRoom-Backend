@@ -45,6 +45,13 @@ export const AssetRefSchema = z.object({
   type: z.enum(["SVG", "IMAGE", "LOTTIE"]).default("SVG"),
   assetId: z.string().max(120).optional(),
   url: z.string().url().max(2048).optional(),
+  naturalWidth: z.number().finite().min(0).max(20000).optional(),
+  naturalHeight: z.number().finite().min(0).max(20000).optional(),
+  attribution: z.object({
+    photographer: z.string().max(200).optional(),
+    photographerUrl: z.string().url().max(2048).optional(),
+    provider: z.enum(["PEXELS", "UNSPLASH"]).optional(),
+  }).optional(),
 });
 
 export const ACTION_TYPES = [
@@ -75,8 +82,10 @@ const FrameSchema = z.object({
   width: dimension,
   height: dimension,
   rotation: num.min(-360).max(360).default(0),
-  scaleX: num.min(0).max(20).default(1),
-  scaleY: num.min(0).max(20).default(1),
+  // Negative scale is how a horizontal/vertical flip is expressed (see the
+  // Image inspector's Flip controls), so the range spans both signs.
+  scaleX: num.min(-20).max(20).default(1),
+  scaleY: num.min(-20).max(20).default(1),
   zIndex: z.number().int().min(0).max(100000).default(0),
 });
 
@@ -175,9 +184,12 @@ export const StyleSchema = z.object({
   }).optional(),
   blur: num.min(0).max(400).optional(),
   backdropBlur: num.min(0).max(400).optional(),
-  // Generic shape clip for badge/label (and future) nodes — a pill/circle/hexagon/
-  // diamond/shield/star/burst silhouette applied via CSS clip-path.
-  clipShape: z.enum(["pill", "circle", "hexagon", "diamond", "shield", "star", "burst"]).optional(),
+  // Generic shape clip for badge/label/image nodes — a silhouette applied via CSS
+  // clip-path (or border-radius for the circular ones). Independent of borderRadius.
+  clipShape: z.enum([
+    "pill", "circle", "hexagon", "diamond", "shield", "star", "burst",
+    "rectangle", "rounded", "ellipse", "blob",
+  ]).optional(),
 });
 
 export const ContentSchema = z.object({
@@ -195,11 +207,38 @@ export const ContentSchema = z.object({
   spans: z.array(z.object({ text: z.string().max(500), style: StyleSchema.optional() })).max(30).optional(),
 });
 
+const ImageCropSchema = z.object({
+  x: num.min(0).max(1),
+  y: num.min(0).max(1),
+  width: num.min(0.01).max(1),
+  height: num.min(0.01).max(1),
+});
+
+const ImageFiltersSchema = z.object({
+  brightness: num.min(0).max(3).optional(),
+  contrast: num.min(0).max(3).optional(),
+  saturate: num.min(0).max(3).optional(),
+  hueRotate: num.min(0).max(360).optional(),
+  grayscale: num.min(0).max(1).optional(),
+});
+
+const ImageOverlaySchema = z.object({
+  color: colorString.optional(),
+  gradient: GradientSchema.optional(),
+  opacity: num.min(0).max(1).optional(),
+  blendMode: z.enum(["normal", "multiply", "screen", "overlay", "darken", "lighten"]).optional(),
+});
+
 const ImageConfigSchema = z.object({
   fit: z.enum(["cover", "contain", "fill", "none"]).default("contain"),
   position: z.enum(["center", "top", "bottom", "left", "right"]).default("center"),
   opacity: num.min(0).max(1).default(1),
   borderRadius: num.min(0).max(9999).optional(),
+  // Non-destructive crop rect (fractions of the natural image) — when set, this
+  // takes precedence over fit/position at render time.
+  crop: ImageCropSchema.optional(),
+  filters: ImageFiltersSchema.optional(),
+  overlay: ImageOverlaySchema.optional(),
 });
 
 const AnimStepSchema = z.object({
@@ -325,6 +364,9 @@ export const NotificationDesignSchema = z.object({
   canvas: CanvasSchema,
   elements: z.array(NodeSchema).max(MAX_TOP_LEVEL),
   globalAnimation: AnimationSchema.optional(),
+  // Total playback duration for the Timeline's Play/scrub control — every
+  // element's animation delay/duration is measured against this window.
+  timeline: z.object({ durationMs: z.number().int().min(500).max(60000).default(4000) }).optional(),
   metadata: DesignMetadataSchema,
 });
 

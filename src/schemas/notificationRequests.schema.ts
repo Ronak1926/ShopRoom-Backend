@@ -58,7 +58,16 @@ export const ListAnimationsQuerySchema = z.object({
   category: z.enum(["ENTRY", "ATTENTION", "CLICK", "EXIT"]).optional(),
 });
 
+/** GET /api/notifications/stock-images — Pexels/Unsplash search. */
+export const StockImageSearchQuerySchema = z.object({
+  query: z.string().min(1).max(200),
+  category: z.string().max(60).optional(),
+  provider: z.enum(["PEXELS", "UNSPLASH"]).optional(),
+  page: z.coerce.number().int().min(1).max(50).default(1),
+});
+
 export type CreateDesignInput = z.infer<typeof CreateDesignSchema>;
 export type PatchDesignInput = z.infer<typeof PatchDesignSchema>;
 export type UploadAssetInput = z.infer<typeof UploadAssetSchema>;
 export type ListDesignsQuery = z.infer<typeof ListDesignsQuerySchema>;
+export type StockImageSearchQuery = z.infer<typeof StockImageSearchQuerySchema>;

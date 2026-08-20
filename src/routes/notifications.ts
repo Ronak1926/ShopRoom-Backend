@@ -16,6 +16,7 @@
  *   Assets
  *     POST   /assets                  — upload image asset
  *     GET    /assets                  — list own assets
+ *     GET    /stock-images            — search Pexels/Unsplash stock photos
  *   Templates
  *     GET    /templates               — list ShopRoom templates
  *     GET    /templates/:id           — fetch a template
@@ -52,6 +53,7 @@ import {
   uploadAsset,
   listAssets,
 } from "../controllers/notificationAsset.controller.js";
+import { searchStockImages } from "../controllers/stockImage.controller.js";
 import {
   listCategories,
   getCapabilities,
@@ -79,6 +81,16 @@ const uploadLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+/** Stock search hits third-party provider rate limits — keep it bounded. */
+const stockImageLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => req.shopkeeperId ?? ipKeyGenerator(req.ip ?? ""),
+  message: { message: "Too many searches. Please slow down." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 export const notificationsRouter = Router();
@@ -99,6 +111,7 @@ notificationsRouter.post("/designs/:id/restore", restoreDesign);
 // Assets
 notificationsRouter.post("/assets", uploadLimiter, uploadAsset);
 notificationsRouter.get("/assets", listAssets);
+notificationsRouter.get("/stock-images", stockImageLimiter, searchStockImages);
 
 // Templates
 notificationsRouter.get("/templates", listTemplates);

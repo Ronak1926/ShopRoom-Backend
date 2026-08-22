@@ -278,13 +278,21 @@ const ImageConfigSchema = z.object({
   overlay: ImageOverlaySchema.optional(),
 });
 
+/**
+ * One animation step. Stored compactly: the editor omits any field equal to its
+ * default (see compactStep in the frontend's animationPresets.ts), so a plain
+ * Fade In persists as { "type": "FADE_IN" } rather than six redundant keys.
+ * Every field below is therefore optional with a default applied on read.
+ */
 const AnimStepSchema = z.object({
   type: z.string().max(64),
-  durationMs: z.number().int().min(0).max(60000).default(400),
+  durationMs: z.number().int().min(0).max(60000).default(500),
   delayMs: z.number().int().min(0).max(60000).default(0),
   easing: z.enum(EASINGS).default("easeOut"),
   intensity: num.min(0).max(20).optional(),
   repeat: z.union([z.number().int().min(0).max(1000), z.literal("infinite")]).optional(),
+  direction: z.enum(["up", "down", "left", "right", "center"]).optional(),
+  fillMode: z.enum(["forwards", "backwards", "both", "none"]).optional(),
 });
 export const AnimationSchema = z.object({
   entry: AnimStepSchema.optional(),

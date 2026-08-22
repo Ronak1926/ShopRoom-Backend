@@ -54,6 +54,41 @@ export const AssetRefSchema = z.object({
   }).optional(),
 });
 
+/**
+ * Icon names a node's `content.icon` may reference.
+ *
+ * MUST mirror ICON_REGISTRY in
+ * shoproom-frontend/src/features/notifications/icons.tsx — the renderer maps a
+ * name to a component through that registry, so a name missing from it renders
+ * as nothing at all. Validating here turns that silent blank into a rejected
+ * save. When adding an icon to the frontend registry, add it here too.
+ *
+ * Note: this is NOT the same field as NotificationCategory.icon (seeded
+ * Material Symbols ligatures like "local_offer") — that's category list
+ * metadata on a different table and is unaffected by this enum.
+ */
+export const ICON_NAMES = [
+  "AcUnit", "AccessTime", "AccountBalanceWallet", "Add", "Analytics", "ArrowBack",
+  "ArrowDownward", "ArrowForward", "ArrowUpward", "Assignment", "AutoAwesome", "Autorenew",
+  "Bolt", "Bookmark", "Build", "CalendarMonth", "Campaign", "CardGiftcard",
+  "Celebration", "CheckCircleOutlined", "Checkroom", "ChevronRight", "Close", "CreditCard",
+  "Delete", "Devices", "Diamond", "Discount", "Download", "Edit",
+  "EditNote", "EmojiEvents", "Event", "Facebook", "Favorite", "FiberManualRecord",
+  "FiberNew", "FilterList", "FlashOn", "GridView", "Help", "HighlightOff",
+  "Home", "HourglassBottom", "Image", "Info", "Instagram", "Inventory2",
+  "Language", "LinkedIn", "LocalFireDepartment", "LocalMall", "LocalOffer", "LocalShipping",
+  "LocationOn", "Lock", "LockOpen", "Mail", "Menu", "MoreHoriz",
+  "NewReleases", "Notifications", "Pause", "Percent", "Person", "Phone",
+  "Pinterest", "PlayArrow", "QrCode", "RadioButtonUnchecked", "Receipt", "Reddit",
+  "Redeem", "Refresh", "Remove", "RemoveShoppingCart", "Replay", "RocketLaunch",
+  "Schedule", "School", "Search", "Sell", "Settings", "Share",
+  "Shield", "ShoppingBag", "ShoppingCart", "Spa", "SportsSoccer", "Star",
+  "Storefront", "Telegram", "ThumbUp", "Toys", "TrendingUp", "Tune",
+  "Twitter", "Verified", "VerifiedUser", "Visibility", "VisibilityOff", "VolumeUp",
+  "Warning", "WbSunny", "WhatsApp", "Whatshot", "WorkspacePremium", "YouTube",
+] as const;
+export const IconNameSchema = z.enum(ICON_NAMES);
+
 export const ACTION_TYPES = [
   "OPEN_PRODUCT", "OPEN_ROOM", "OPEN_CHAT", "OPEN_COLLECTION", "OPEN_URL", "JOIN_ROOM", "NONE",
 ] as const;
@@ -197,7 +232,9 @@ export const ContentSchema = z.object({
   source: z.enum(["STATIC", "DYNAMIC"]).optional(),
   variable: z.string().max(120).optional(),
   label: z.string().max(200).optional(),
-  icon: z.string().max(64).optional(),
+  // Must resolve in the renderer's icon registry — an unknown name would
+  // render as nothing at all, so it's rejected here rather than saved blank.
+  icon: IconNameSchema.optional(),
   iconPosition: z.enum(["left", "right", "only", "none"]).optional(),
   iconSize: num.min(4).max(200).optional(),
   value: z.union([z.string().max(200), num]).optional(),

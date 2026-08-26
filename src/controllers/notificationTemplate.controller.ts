@@ -8,16 +8,20 @@ import {
   getTemplate as getTemplateService,
   useTemplate as useTemplateService,
 } from "../services/notificationTemplate.service.js";
+import { ListTemplatesQuerySchema } from "../schemas/notificationRequests.schema.js";
 import { handleControllerError, requireIdParam } from "./notificationResponse.js";
 
-// GET /api/notifications/templates?categoryId=
+// GET /api/notifications/templates?categoryId=&q=&sort=&page=&limit=
 export async function listTemplates(req: Request, res: Response): Promise<void> {
+  const parsed = ListTemplatesQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid query" });
+    return;
+  }
   try {
-    const categoryId =
-      typeof req.query.categoryId === "string" ? req.query.categoryId : undefined;
-    const templates = await listTemplatesService(categoryId);
+    const result = await listTemplatesService(parsed.data);
     res.set("Cache-Control", "private, max-age=60");
-    res.json({ data: templates });
+    res.json({ data: result });
   } catch (err) {
     handleControllerError(res, err, "Failed to list templates");
   }

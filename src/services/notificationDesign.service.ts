@@ -133,6 +133,9 @@ export async function listDesigns(
         version: true,
         isArchived: true,
         updatedAt: true,
+        // Carried so the Templates browser can render a live card preview
+        // instead of a name on an empty tile. Bounded by `limit`.
+        designJson: true,
       },
     }),
     prisma.notificationDesign.count({ where }),

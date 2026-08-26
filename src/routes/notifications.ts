@@ -18,7 +18,7 @@
  *     GET    /assets                  — list own assets
  *     GET    /stock-images            — search Pexels/Unsplash stock photos
  *   Templates
- *     GET    /templates               — list ShopRoom templates
+ *     GET    /templates               — paginated catalog (categoryId, q, sort, page, limit)
  *     GET    /templates/:id           — fetch a template
  *     POST   /templates/:id/use       — clone into an owned design
  *   Catalog

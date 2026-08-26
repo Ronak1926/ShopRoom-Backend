@@ -11,21 +11,59 @@ import { cloneDesignJson, toJsonInput } from "../utils/notificationDesign.js";
 import { validateDesign } from "./notificationValidation.service.js";
 import { meetsRequiredPlan } from "./notificationPlan.service.js";
 
-/** Catalog listing (no heavy designJson payload). */
-export function listTemplates(categoryId?: string) {
-  return prisma.notificationTemplate.findMany({
-    where: { isActive: true, ...(categoryId ? { categoryId } : {}) },
-    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-    select: {
-      id: true,
-      slug: true,
-      name: true,
-      categoryId: true,
-      thumbnailUrl: true,
-      requiredPlan: true,
-      schemaVersion: true,
-    },
-  });
+export interface ListTemplatesOptions {
+  categoryId?: string;
+  q?: string;
+  sort?: "popular" | "newest" | "name";
+  page?: number;
+  limit?: number;
+}
+
+/**
+ * Paginated catalog listing.
+ *
+ * designJson IS included: thumbnailUrl is never populated, and the browser
+ * renders each card through the same renderer the canvas uses, so previews stay
+ * accurate without a screenshot pipeline to keep in sync. The page size is
+ * capped at 24 upstream to keep the payload bounded.
+ */
+export async function listTemplates(options: ListTemplatesOptions = {}) {
+  const page = Math.max(1, options.page ?? 1);
+  const limit = Math.min(24, Math.max(1, options.limit ?? 10));
+  const q = options.q?.trim();
+
+  const where = {
+    isActive: true,
+    ...(options.categoryId ? { categoryId: options.categoryId } : {}),
+    ...(q ? { name: { contains: q, mode: "insensitive" as const } } : {}),
+  };
+
+  const orderBy =
+    options.sort === "newest" ? [{ createdAt: "desc" as const }]
+    : options.sort === "name" ? [{ name: "asc" as const }]
+    : [{ sortOrder: "asc" as const }, { createdAt: "asc" as const }];
+
+  const [items, total] = await Promise.all([
+    prisma.notificationTemplate.findMany({
+      where,
+      orderBy,
+      skip: (page - 1) * limit,
+      take: limit,
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        categoryId: true,
+        designJson: true,
+        thumbnailUrl: true,
+        requiredPlan: true,
+        schemaVersion: true,
+      },
+    }),
+    prisma.notificationTemplate.count({ where }),
+  ]);
+
+  return { items, total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)) };
 }
 
 export async function getTemplate(id: string) {

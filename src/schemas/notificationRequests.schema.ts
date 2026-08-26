@@ -53,6 +53,21 @@ export const ListDesignsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
+/**
+ * GET /api/notifications/templates — paginated catalog query.
+ *
+ * `limit` is capped at 24 rather than 100 because this listing carries each
+ * template's full designJson so the browser can render a live preview instead
+ * of a stored thumbnail. A bigger page would mean a multi-megabyte response.
+ */
+export const ListTemplatesQuerySchema = z.object({
+  categoryId: z.string().max(64).optional(),
+  q: z.string().max(120).optional(),
+  sort: z.enum(["popular", "newest", "name"]).default("popular"),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(24).default(10),
+});
+
 /** GET /api/notifications/animations — optional category filter. */
 export const ListAnimationsQuerySchema = z.object({
   category: z.enum(["ENTRY", "ATTENTION", "CLICK", "EXIT"]).optional(),

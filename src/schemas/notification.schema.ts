@@ -94,6 +94,34 @@ export const ACTION_TYPES = [
 ] as const;
 
 export const EASINGS = ["linear", "easeIn", "easeOut", "easeInOut"] as const;
+
+/**
+ * Every animation type the renderer can play, mirroring ANIMATION_PRESETS in
+ * the frontend's features/notifications/animationPresets.ts.
+ *
+ * Same reasoning as ICON_NAMES: AnimatedNode looks the type up in its ENTRIES /
+ * EMPHASIS / EXITS maps and silently renders the element at rest when there's
+ * no match, so an unknown type saves fine and then simply never animates. This
+ * turns that silent no-op into a rejected save. When adding a preset to the
+ * frontend catalog, add its type here too.
+ */
+export const ANIMATION_TYPES = [
+  // Accepted but inert: the editor drops a "None" step rather than storing it,
+  // so this only exists to keep designs saved before that behaviour loadable.
+  "NONE",
+  // Entrance
+  "FADE_IN", "ZOOM_IN", "ZOOM_OUT_IN", "POP", "BOUNCE_IN", "ELASTIC_IN",
+  "SLIDE_UP", "SLIDE_DOWN", "SLIDE_LEFT", "SLIDE_RIGHT", "FLOAT_IN", "DROP_IN",
+  "ROTATE_IN", "ROLL_IN", "SWING_IN", "FLIP_IN_Y", "FLIP_IN_X", "TILT_IN",
+  "BLUR_IN", "SKEW_IN", "UNFOLD_IN", "SPLIT_IN", "BACK_IN", "CIRCLE_IN",
+  // Emphasis
+  "PULSE", "GLOW", "FLASH", "FLOAT", "WIGGLE", "SHAKE", "HEARTBEAT",
+  "SPIN", "SPIN_Y", "BOUNCE", "TADA", "SWING", "RUBBER_BAND", "JELLO", "WOBBLE",
+  // Exit
+  "FADE_OUT", "ZOOM_OUT", "POP_OUT", "BOUNCE_OUT", "SLIDE_OUT_UP", "SLIDE_OUT_DOWN",
+  "SLIDE_OUT_LEFT", "SLIDE_OUT_RIGHT", "DROP_OUT", "ROLL_OUT", "FLIP_OUT",
+  "FLIP_OUT_X", "BLUR_OUT", "SKEW_OUT", "FOLD_OUT", "CIRCLE_OUT",
+] as const;
 export const DESIGN_STATUSES = ["DRAFT", "ACTIVE", "ARCHIVED"] as const;
 export const DESIGN_SOURCES = [
   "SHOPROOM_TEMPLATE", "USER_TEMPLATE", "CUSTOM", "DUPLICATED",
@@ -285,7 +313,7 @@ const ImageConfigSchema = z.object({
  * Every field below is therefore optional with a default applied on read.
  */
 const AnimStepSchema = z.object({
-  type: z.string().max(64),
+  type: z.enum(ANIMATION_TYPES),
   durationMs: z.number().int().min(0).max(60000).default(500),
   delayMs: z.number().int().min(0).max(60000).default(0),
   easing: z.enum(EASINGS).default("easeOut"),

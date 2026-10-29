@@ -9,6 +9,7 @@ import {
   getShopkeeperPlan,
   getPlanCapabilities,
 } from "../services/notificationPlan.service.js";
+import { getSendsToday } from "../services/notificationUsage.service.js";
 import { handleControllerError } from "./notificationResponse.js";
 
 // GET /api/notifications/categories
@@ -25,8 +26,13 @@ export async function listCategories(req: Request, res: Response): Promise<void>
 // GET /api/notifications/capabilities — plan-derived feature flags + limits
 export async function getCapabilities(req: Request, res: Response): Promise<void> {
   try {
-    const planType = await getShopkeeperPlan(req.shopkeeperId!);
-    res.json({ data: { planType, capabilities: getPlanCapabilities(planType) } });
+    const [planType, usedToday] = await Promise.all([
+      getShopkeeperPlan(req.shopkeeperId!),
+      getSendsToday(req.shopkeeperId!),
+    ]);
+    res.json({
+      data: { planType, capabilities: getPlanCapabilities(planType), usedToday },
+    });
   } catch (err) {
     handleControllerError(res, err, "Failed to load capabilities");
   }

@@ -8,6 +8,7 @@ import {
   googleAuthCustomer,
   loginCustomer,
   registerCustomer,
+  reportCustomerLocation,
   updateCustomer,
 } from "../services/customers.service.js";
 import { firebaseAuth } from "../lib/firebaseAdmin.js";
@@ -129,6 +130,28 @@ export async function updateCustomerHandler(req: Request, res: Response) {
 
   const customer = await updateCustomer(customerId, parsed.data);
   return res.json({ customer, message: "Profile updated" });
+}
+
+// ─── PUT /api/customers/me/location ───────────────────────────────────────────
+// The device's current position, for radius-based notifications.
+// Body: { latitude, longitude }. Auth: requireCustomerAuth.
+
+const reportLocationSchema = z.object({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+});
+
+export async function reportLocationHandler(req: Request, res: Response) {
+  const parsed = parseBody(req, reportLocationSchema);
+  if (!parsed.ok) {
+    return validationError(res, parsed.error);
+  }
+
+  const stored = await reportCustomerLocation(req.customerId!, parsed.data);
+  if (!stored) {
+    return res.status(403).json({ message: "Location access is turned off for this account" });
+  }
+  return res.json({ message: "Location updated" });
 }
 
 // ─── GET /api/customers/me/rooms ──────────────────────────────────────────────

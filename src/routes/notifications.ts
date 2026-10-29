@@ -28,7 +28,13 @@
  *   Validation
  *     POST   /validate-design         — validate a design document
  *   Send
- *     POST   /send                    — dispatch a design to a room as a push notification
+ *     POST   /send                    — dispatch a design to an audience as a push notification
+ *     GET    /sends                   — send history with delivery analytics
+ *   Schedules
+ *     POST   /schedules               — queue a send for later (once or recurring)
+ *     GET    /schedules               — list schedules (?state=upcoming|completed)
+ *     PATCH  /schedules/:id           — pause or resume
+ *     DELETE /schedules/:id           — cancel
  */
 
 import { Router } from "express";
@@ -60,7 +66,16 @@ import {
   listCategories,
   getCapabilities,
 } from "../controllers/notificationCategory.controller.js";
-import { sendNotificationHandler } from "../controllers/notificationSend.controller.js";
+import {
+  sendNotificationHandler,
+  listSendsHandler,
+} from "../controllers/notificationSend.controller.js";
+import {
+  createScheduleHandler,
+  listSchedulesHandler,
+  updateScheduleStatusHandler,
+  cancelScheduleHandler,
+} from "../controllers/notificationSchedule.controller.js";
 
 // ── Rate limiters ───────────────────────────────────────────────────────────────
 
@@ -104,6 +119,16 @@ const sendLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+/** Pausing, resuming and cancelling schedules is cheap — kept apart from sendLimiter so managing schedules never eats into the allowance for sending. */
+const scheduleLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => req.shopkeeperId ?? ipKeyGenerator(req.ip ?? ""),
+  message: { message: "Too many schedule changes. Please slow down." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 export const notificationsRouter = Router();
@@ -141,3 +166,10 @@ notificationsRouter.post("/validate-design", validateDesign);
 
 // Send
 notificationsRouter.post("/send", sendLimiter, sendNotificationHandler);
+notificationsRouter.get("/sends", listSendsHandler);
+
+// Schedules
+notificationsRouter.post("/schedules", scheduleLimiter, createScheduleHandler);
+notificationsRouter.get("/schedules", listSchedulesHandler);
+notificationsRouter.patch("/schedules/:id", scheduleLimiter, updateScheduleStatusHandler);
+notificationsRouter.delete("/schedules/:id", scheduleLimiter, cancelScheduleHandler);

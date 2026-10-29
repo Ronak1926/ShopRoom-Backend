@@ -59,6 +59,12 @@ export async function registerCustomer(input: {
       allowLocationAccess: input.allowLocationAccess,
       latitude: typeof input.latitude === "number" ? input.latitude : null,
       longitude: typeof input.longitude === "number" ? input.longitude : null,
+      locationUpdatedAt:
+        input.allowLocationAccess &&
+        typeof input.latitude === "number" &&
+        typeof input.longitude === "number"
+          ? new Date()
+          : null,
     },
     select: {
       id: true,
@@ -86,6 +92,10 @@ export async function updateCustomer(
       ...(input.allowLocationAccess !== undefined
         ? { allowLocationAccess: input.allowLocationAccess }
         : {}),
+      // Withdrawing consent also erases the stored position.
+      ...(input.allowLocationAccess === false
+        ? { latitude: null, longitude: null, locationUpdatedAt: null }
+        : {}),
     },
     select: {
       id: true,
@@ -99,6 +109,22 @@ export async function updateCustomer(
     },
   });
   return toSafeCustomer(customer);
+}
+
+/**
+ * Stores the customer's current position for radius-based notifications.
+ * Returns false when they haven't consented to location access, so a client
+ * can't push coordinates for an account that opted out.
+ */
+export async function reportCustomerLocation(
+  id: string,
+  position: { latitude: number; longitude: number },
+): Promise<boolean> {
+  const result = await prisma.customer.updateMany({
+    where: { id, allowLocationAccess: true },
+    data: { ...position, locationUpdatedAt: new Date() },
+  });
+  return result.count === 1;
 }
 
 export async function getCustomerById(id: string) {

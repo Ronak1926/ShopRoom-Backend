@@ -24,4 +24,12 @@ export class NotificationError extends Error {
   static badRequest(message = "Invalid request") {
     return new NotificationError(400, message);
   }
+
+  static tooManyRequests(message = "Limit reached") {
+    return new NotificationError(429, message);
+  }
+
+  static badGateway(message = "Upstream service unavailable") {
+    return new NotificationError(502, message);
+  }
 }

@@ -13,8 +13,10 @@
 
 import type { Server as HTTPServer } from "http";
 import { Server as SocketIOServer, type Socket } from "socket.io";
+import { allowedOrigins } from "../config/env.js";
 import { verifyCustomerToken, verifyShopkeeperToken } from "../utils/jwt.js";
 import { prisma } from "../database/prisma.js";
+import { isSessionActive } from "../services/session.service.js";
 import {
   assertRoomAccess,
   createMessage,
@@ -127,6 +129,11 @@ function emitPresence(io: AppServer, roomId: string) {
   io.to(roomId).emit("presence:update", { roomId, onlineCustomerIds: ids });
 }
 
+/** Room and message ids are short opaque strings; anything else is a malformed event. */
+function isId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 64;
+}
+
 function senderIdOf(data: SocketData): string {
   return (data.customerId ?? data.shopkeeperId)!;
 }
@@ -145,7 +152,12 @@ let ioInstance: AppServer | null = null;
 
 export function createSocketServer(httpServer: HTTPServer): AppServer {
   const io: AppServer = new SocketIOServer(httpServer, {
-    cors: { origin: true, credentials: true },
+    cors: {
+      origin(origin, callback) {
+        const allowed = allowedOrigins();
+        callback(null, !origin || allowed === null || allowed.includes(origin));
+      },
+    },
     // Snappier stale-connection detection than the 25s/20s defaults, so a
     // closed tab clears its "online" presence in seconds, not tens of seconds.
     pingInterval: 10_000,
@@ -165,6 +177,9 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
     try {
       if (role === "customer") {
         const payload = verifyCustomerToken(token);
+        if (!(await isSessionActive("customer", payload.sub, payload.tv))) {
+          throw new Error("Session revoked");
+        }
         const customer = await prisma.customer.findUnique({
           where: { id: payload.sub },
           select: { fullName: true },
@@ -175,6 +190,9 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
         socket.data.typingRooms = new Set();
       } else if (role === "shopkeeper") {
         const payload = verifyShopkeeperToken(token);
+        if (!(await isSessionActive("shopkeeper", payload.sub, payload.tv))) {
+          throw new Error("Session revoked");
+        }
         const shopkeeper = await prisma.shopkeeper.findUnique({
           where: { id: payload.sub },
           select: { ownerName: true },
@@ -212,7 +230,7 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
     }
 
     socket.on("room:join", async ({ roomId }) => {
-      if (!roomId) return;
+      if (!isId(roomId)) return;
       try {
         await assertRoomAccess(roomId, ctx);
       } catch {
@@ -239,7 +257,7 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
     });
 
     socket.on("room:leave", ({ roomId }) => {
-      if (!roomId) return;
+      if (!isId(roomId)) return;
       socket.leave(roomId);
       if (socket.data.customerId) {
         presenceByRoom.get(roomId)?.delete(socket.data.customerId);
@@ -249,7 +267,8 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
     });
 
     socket.on("message:send", async ({ roomId, text, replyToId }) => {
-      if (!roomId || typeof text !== "string") return;
+      if (!isId(roomId) || typeof text !== "string") return;
+      if (replyToId !== undefined && !isId(replyToId)) return;
       const trimmed = text.trim();
       if (!trimmed || trimmed.length > 2000) {
         socket.emit("error", {
@@ -273,7 +292,7 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
     });
 
     socket.on("message:edit", async ({ roomId, messageId, text }) => {
-      if (!roomId || !messageId || typeof text !== "string") return;
+      if (!isId(roomId) || !isId(messageId) || typeof text !== "string") return;
       const trimmed = text.trim();
       if (!trimmed || trimmed.length > 2000) {
         socket.emit("error", { message: "Message must be 1-2000 characters" });
@@ -285,7 +304,7 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
       }
       try {
         await assertRoomAccess(roomId, ctx);
-        const updated = await editMessage(messageId, trimmed, ctx);
+        const updated = await editMessage(roomId, messageId, trimmed, ctx);
         io.to(roomId).emit("message:updated", updated);
       } catch (err) {
         socket.emit("error", {
@@ -295,14 +314,14 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
     });
 
     socket.on("message:delete", async ({ roomId, messageId, scope }) => {
-      if (!roomId || !messageId || (scope !== "everyone" && scope !== "me")) return;
+      if (!isId(roomId) || !isId(messageId) || (scope !== "everyone" && scope !== "me")) return;
       if (isRateLimited(socket.id)) {
         socket.emit("error", { message: "You're sending messages too fast" });
         return;
       }
       try {
         await assertRoomAccess(roomId, ctx);
-        await deleteMessage(messageId, scope, ctx);
+        await deleteMessage(roomId, messageId, scope, ctx);
         if (scope === "everyone") {
           io.to(roomId).emit("message:deleted", { roomId, messageId });
         } else {
@@ -316,14 +335,14 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
     });
 
     socket.on("message:react", async ({ roomId, messageId, emoji }) => {
-      if (!roomId || !messageId || typeof emoji !== "string" || !emoji) return;
+      if (!isId(roomId) || !isId(messageId) || typeof emoji !== "string" || !emoji) return;
       if (isRateLimited(socket.id)) {
         socket.emit("error", { message: "You're sending messages too fast" });
         return;
       }
       try {
         await assertRoomAccess(roomId, ctx);
-        const reactions = await reactToMessage(messageId, emoji, ctx);
+        const reactions = await reactToMessage(roomId, messageId, emoji, ctx);
         io.to(roomId).emit("message:reacted", { roomId, messageId, reactions });
       } catch {
         socket.emit("error", { message: "Could not react to message" });
@@ -331,7 +350,7 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
     });
 
     socket.on("room:read", async ({ roomId, at }) => {
-      if (!roomId || !at) return;
+      if (!isId(roomId) || typeof at !== "string") return;
       const atDate = new Date(at);
       if (Number.isNaN(atDate.getTime())) return;
       try {
@@ -349,7 +368,7 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
     });
 
     socket.on("chat:clear", async ({ roomId }) => {
-      if (!roomId) return;
+      if (!isId(roomId)) return;
       try {
         await assertRoomAccess(roomId, ctx);
         const clearedAt = await clearRoomForViewer(roomId, ctx);
@@ -360,7 +379,9 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
     });
 
     socket.on("typing:start", ({ roomId }) => {
-      if (!roomId) return;
+      // Only rooms this socket was admitted to (room:join checks membership);
+      // otherwise anyone could spoof "X is typing" into a room they can't see.
+      if (!isId(roomId) || !socket.rooms.has(roomId)) return;
       socket.data.typingRooms.add(roomId);
       socket.to(roomId).emit("typing:update", {
         roomId,
@@ -371,7 +392,7 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
     });
 
     socket.on("typing:stop", ({ roomId }) => {
-      if (!roomId) return;
+      if (!isId(roomId)) return;
       stopTyping(roomId);
     });
 
@@ -388,6 +409,31 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
 
   ioInstance = io;
   return io;
+}
+
+/** Drops every live connection of one participant (account deleted or signed out everywhere). */
+export function disconnectViewer(viewerKey: string): void {
+  ioInstance?.in(personalRoom(viewerKey)).disconnectSockets(true);
+}
+
+/**
+ * Takes a customer out of a room's live channel after they leave it or their
+ * account is deleted — otherwise their open sockets would keep receiving the
+ * room's messages — and tells the remaining participants.
+ */
+export function removeViewerFromRoom(customerId: string, roomId: string): void {
+  if (!ioInstance) return;
+  ioInstance.in(personalRoom(customerId)).socketsLeave(roomId);
+  presenceByRoom.get(roomId)?.delete(customerId);
+  emitPresence(ioInstance, roomId);
+  ioInstance.to(roomId).emit("member:left", { roomId, customerId });
+}
+
+/** Empties a room's live channel (its shop was deleted). */
+export function closeRoom(roomId: string): void {
+  if (!ioInstance) return;
+  ioInstance.in(roomId).socketsLeave(roomId);
+  presenceByRoom.delete(roomId);
 }
 
 /** The Socket.IO singleton — used by the REST POST endpoint to broadcast

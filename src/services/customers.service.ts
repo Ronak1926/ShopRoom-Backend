@@ -1,5 +1,7 @@
-import bcrypt from "bcrypt";
+import { Prisma } from "../generated/client.js";
 import { prisma } from "../database/prisma.js";
+import { hashPassword, needsRehash, verifyPassword } from "../utils/password.js";
+import { forgetSession } from "./session.service.js";
 
 export type CustomerSafe = {
   id: string;
@@ -44,41 +46,52 @@ export async function registerCustomer(input: {
 }) {
   const existing = await prisma.customer.findUnique({
     where: { email: input.email },
+    select: { id: true },
   });
   if (existing) {
     return { ok: false as const, reason: "EMAIL_EXISTS" as const };
   }
 
-  const passwordHash = await bcrypt.hash(input.password, 10);
+  const passwordHash = await hashPassword(input.password);
 
-  const customer = await prisma.customer.create({
-    data: {
-      fullName: input.fullName,
-      email: input.email,
-      passwordHash,
-      allowLocationAccess: input.allowLocationAccess,
-      latitude: typeof input.latitude === "number" ? input.latitude : null,
-      longitude: typeof input.longitude === "number" ? input.longitude : null,
-      locationUpdatedAt:
-        input.allowLocationAccess &&
-        typeof input.latitude === "number" &&
-        typeof input.longitude === "number"
-          ? new Date()
-          : null,
-    },
-    select: {
-      id: true,
-      fullName: true,
-      email: true,
-      allowLocationAccess: true,
-      latitude: true,
-      longitude: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  });
+  let customer;
+  try {
+    customer = await prisma.customer.create({
+      data: {
+        fullName: input.fullName,
+        email: input.email,
+        passwordHash,
+        allowLocationAccess: input.allowLocationAccess,
+        latitude: typeof input.latitude === "number" ? input.latitude : null,
+        longitude: typeof input.longitude === "number" ? input.longitude : null,
+        locationUpdatedAt:
+          input.allowLocationAccess &&
+          typeof input.latitude === "number" &&
+          typeof input.longitude === "number"
+            ? new Date()
+            : null,
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        allowLocationAccess: true,
+        latitude: true,
+        longitude: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  } catch (err) {
+    // Two sign-ups racing for one email: the unique index picks the loser.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return { ok: false as const, reason: "EMAIL_EXISTS" as const };
+    }
+    throw err;
+  }
 
-  return { ok: true as const, customer: toSafeCustomer(customer) };
+  // A new account has never had a session revoked.
+  return { ok: true as const, customer: toSafeCustomer(customer), tokenVersion: 0 };
 }
 
 export async function updateCustomer(
@@ -185,37 +198,46 @@ export async function googleAuthCustomer(input: {
   email: string;
   fullName: string;
 }) {
-  // Try to find by firebaseUid first, then fall back to email
-  let customer = await prisma.customer.findUnique({
+  const byUid = await prisma.customer.findUnique({
     where: { firebaseUid: input.firebaseUid },
   });
-
-  if (!customer) {
-    customer = await prisma.customer.findUnique({
-      where: { email: input.email },
-    });
-
-    if (customer) {
-      // Existing email-based account — link it to the Google uid
-      customer = await prisma.customer.update({
-        where: { id: customer.id },
-        data: { firebaseUid: input.firebaseUid },
-      });
-    } else {
-      // Brand-new customer — create without a password
-      customer = await prisma.customer.create({
-        data: {
-          fullName: input.fullName,
-          email: input.email,
-          firebaseUid: input.firebaseUid,
-          passwordHash: null,
-          allowLocationAccess: false,
-        },
-      });
-    }
+  if (byUid) {
+    return { customer: toSafeCustomer(byUid), tokenVersion: byUid.tokenVersion };
   }
 
-  return { ok: true as const, customer: toSafeCustomer(customer) };
+  const byEmail = await prisma.customer.findUnique({
+    where: { email: input.email },
+  });
+  if (!byEmail) {
+    // Brand-new customer — create without a password
+    const created = await prisma.customer.create({
+      data: {
+        fullName: input.fullName,
+        email: input.email,
+        firebaseUid: input.firebaseUid,
+        passwordHash: null,
+        emailVerified: true,
+        allowLocationAccess: false,
+      },
+    });
+    return { customer: toSafeCustomer(created), tokenVersion: created.tokenVersion };
+  }
+
+  // Link the Google identity to the existing email account. If nobody ever
+  // proved they own that email, whoever registered it with a password may be
+  // squatting on it: the Google-verified owner takes over, the password is
+  // removed and any session the squatter holds is revoked.
+  const unverifiedSquatter = !byEmail.emailVerified && byEmail.passwordHash !== null;
+  const linked = await prisma.customer.update({
+    where: { id: byEmail.id },
+    data: {
+      firebaseUid: input.firebaseUid,
+      emailVerified: true,
+      ...(unverifiedSquatter ? { passwordHash: null, tokenVersion: { increment: 1 } } : {}),
+    },
+  });
+  if (unverifiedSquatter) forgetSession("customer", linked.id);
+  return { customer: toSafeCustomer(linked), tokenVersion: linked.tokenVersion };
 }
 
 export async function loginCustomer(input: {
@@ -226,26 +248,57 @@ export async function loginCustomer(input: {
     where: { email: input.email },
   });
 
-  if (!customer || !customer.passwordHash) {
+  // Always runs a bcrypt comparison, so unknown emails cost the same time as wrong passwords.
+  const ok = await verifyPassword(input.password, customer?.passwordHash);
+  if (!customer || !ok) {
     return { ok: false as const, reason: "INVALID_CREDENTIALS" as const };
   }
 
-  const ok = await bcrypt.compare(input.password, customer.passwordHash);
-  if (!ok) {
-    return { ok: false as const, reason: "INVALID_CREDENTIALS" as const };
+  if (customer.passwordHash && needsRehash(customer.passwordHash)) {
+    // Best effort: failing to upgrade the hash must not fail the login.
+    await hashPassword(input.password)
+      .then((passwordHash) =>
+        prisma.customer.update({ where: { id: customer.id }, data: { passwordHash } }),
+      )
+      .catch(() => undefined);
   }
 
   return {
     ok: true as const,
-    customer: toSafeCustomer({
-      id: customer.id,
-      fullName: customer.fullName,
-      email: customer.email,
-      allowLocationAccess: customer.allowLocationAccess,
-      latitude: customer.latitude,
-      longitude: customer.longitude,
-      createdAt: customer.createdAt,
-      updatedAt: customer.updatedAt,
-    }),
+    customer: toSafeCustomer(customer),
+    tokenVersion: customer.tokenVersion,
   };
+}
+
+/** Everything the account deletion flow needs to check before erasing a customer. */
+export async function getCustomerAuthFactors(id: string) {
+  return prisma.customer.findUnique({
+    where: { id },
+    select: { passwordHash: true, firebaseUid: true },
+  });
+}
+
+/**
+ * Permanently erases a customer: profile, location, memberships, devices,
+ * messages, reactions and delivery records all go with the row (cascade).
+ * Returns the rooms they belonged to so live connections can be evicted.
+ */
+export async function deleteCustomerAccount(customerId: string): Promise<string[]> {
+  const roomIds = await prisma.$transaction(async (tx) => {
+    const memberships = await tx.membership.findMany({
+      where: { customerId },
+      select: { roomId: true },
+    });
+    const ids = memberships.map((m) => m.roomId);
+    if (ids.length > 0) {
+      await tx.room.updateMany({
+        where: { id: { in: ids } },
+        data: { membersCount: { decrement: 1 } },
+      });
+    }
+    await tx.customer.delete({ where: { id: customerId } });
+    return ids;
+  });
+  forgetSession("customer", customerId);
+  return roomIds;
 }

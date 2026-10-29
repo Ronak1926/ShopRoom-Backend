@@ -98,3 +98,20 @@ export async function uploadNotificationAssetToCloudinary(
     format: result.format,
   };
 }
+
+/**
+ * Cloudinary public id of an image we uploaded, from its delivery URL
+ * (".../upload/v123/shoproom/logos/abc.png" → "shoproom/logos/abc").
+ * Returns null for URLs that aren't ours.
+ */
+export function publicIdFromUrl(url: string): string | null {
+  const match = /^https:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/(?:v\d+\/)?(shoproom\/.+)\.[A-Za-z0-9]+$/.exec(url);
+  return match?.[1] ?? null;
+}
+
+/** Deletes images by public id. Used when an account is erased; callers treat failure as non-fatal. */
+export async function deleteImages(publicIds: string[]): Promise<void> {
+  if (publicIds.length === 0) return;
+  configureCloudinary();
+  await cloudinary.api.delete_resources(publicIds, { resource_type: "image" });
+}

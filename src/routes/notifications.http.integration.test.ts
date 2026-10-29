@@ -31,8 +31,8 @@ describe("notification HTTP API", { skip: !enabled }, () => {
     ({ prisma, firebaseMessaging: messaging } = await connectTestEnvironment());
     const { app } = await import("../app.js");
     const jwt = await import("../utils/jwt.js");
-    shopkeeperToken = jwt.signShopkeeperToken;
-    customerToken = jwt.signCustomerToken;
+    shopkeeperToken = (id) => jwt.signShopkeeperToken(id, 0);
+    customerToken = (id) => jwt.signCustomerToken(id, 0);
     server = createServer(app).listen(0);
     baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   });

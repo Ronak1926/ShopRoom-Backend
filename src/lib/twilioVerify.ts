@@ -25,6 +25,7 @@
  */
 
 import twilio from "twilio";
+import { isProduction } from "../config/env.js";
 
 // ─── Error class ──────────────────────────────────────────────────────────────
 
@@ -52,6 +53,11 @@ function getClient() {
   return { sid, authToken, serviceSid };
 }
 
+/** Keeps phone numbers out of the logs: "+91••••••3210". */
+function maskPhone(e164: string): string {
+  return `${e164.slice(0, 3)}••••••${e164.slice(-4)}`;
+}
+
 function toE164(phoneNumber: string): string {
   // Accepts a raw 10-digit Indian number and prepends country code
   return `+91${phoneNumber}`;
@@ -74,12 +80,14 @@ export async function sendVerifyOtp(phoneNumber: string): Promise<void> {
   const { sid, authToken, serviceSid } = getClient();
 
   if (!sid || !authToken || !serviceSid) {
+    // Never let a missing credential turn phone verification into a no-op in production.
+    if (isProduction()) throw new VerifyError("Phone verification is temporarily unavailable.");
     console.warn(
       `\n⚠️  [Twilio Verify] Credentials not configured — OTP NOT sent.\n` +
         `   Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_VERIFY_SERVICE_SID in .env\n` +
-        `   DEV: phone ${phoneNumber} is treated as verified.\n`,
+        `   DEV: the phone number is treated as verified.\n`,
     );
-    return; // Fail open in dev
+    return;
   }
 
   const client = twilio(sid, authToken);
@@ -98,7 +106,7 @@ export async function sendVerifyOtp(phoneNumber: string): Promise<void> {
     }
 
     console.log(
-      `[Twilio Verify] OTP sent to ${to} — status: ${verification.status}`,
+      `[Twilio Verify] OTP sent to ${maskPhone(to)} — status: ${verification.status}`,
     );
   } catch (err: unknown) {
     const e = err as { code?: number; message?: string; status?: number };
@@ -150,10 +158,9 @@ export async function checkVerifyOtp(
   const { sid, authToken, serviceSid } = getClient();
 
   if (!sid || !authToken || !serviceSid) {
+    if (isProduction()) throw new VerifyError("Phone verification is temporarily unavailable.");
     // Dev fallback: accept any 6-digit code
-    console.warn(
-      `[Twilio Verify] Credentials not configured — accepting code "${code}" in dev mode.\n`,
-    );
+    console.warn("[Twilio Verify] Credentials not configured — accepting any code in dev mode.\n");
     return true;
   }
 
@@ -173,7 +180,7 @@ export async function checkVerifyOtp(
     //   "expired"             → 10 minutes passed
     switch (check.status) {
       case "approved":
-        console.log(`[Twilio Verify] Code approved for ${to}`);
+        console.log(`[Twilio Verify] Code approved for ${maskPhone(to)}`);
         return true;
 
       case "pending":

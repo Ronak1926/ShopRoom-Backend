@@ -5,6 +5,7 @@
  */
 
 import z from "zod";
+import { imageDataUriSchema } from "./imageUpload.schema.js";
 import {
   NotificationDesignSchema,
   NotificationTypeSchema,
@@ -36,10 +37,7 @@ export const ValidateDesignSchema = z.object({
 
 /** POST /api/notifications/assets — upload an image asset (base64 data URI). */
 export const UploadAssetSchema = z.object({
-  image: z
-    .string()
-    .max(15_000_000) // ~11MB of base64
-    .regex(/^data:image\/(png|jpe?g|webp);base64,/, "Expected a base64 image data URI"),
+  image: imageDataUriSchema,
   width: z.number().int().positive().max(10000).optional(),
   height: z.number().int().positive().max(10000).optional(),
   sizeBytes: z.number().int().positive().max(10_000_000).optional(),

@@ -1,6 +1,5 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
-import bcrypt from "bcrypt";
 import {
   initShopkeeperDraft,
   updateShopkeeperDraft,
@@ -8,6 +7,7 @@ import {
   verifyPhoneOtp,
   createOrder,
   verifyPaymentAndRegister,
+  assertDraftActive,
 } from "../services/shopkeeper.service.js";
 import { uploadLogoToCloudinary } from "../lib/cloudinary.js";
 import { validatePhoneNumber } from "../lib/phoneValidation.js";
@@ -15,34 +15,68 @@ import { VerifyError } from "../lib/twilioVerify.js";
 import { verifyWebhookSignature } from "../lib/razorpay.js";
 import { signShopkeeperToken } from "../utils/jwt.js";
 import { prisma } from "../database/prisma.js";
+import { imageDataUriSchema } from "../schemas/imageUpload.schema.js";
+import { newPasswordSchema, needsRehash, hashPassword, verifyPassword } from "../utils/password.js";
+import { RegistrationError } from "../utils/registrationError.js";
+import { NotificationError } from "../utils/notificationError.js";
+import { revokeSessions } from "../services/session.service.js";
+import { deleteShopkeeperAccount } from "../services/shopkeeperAccount.service.js";
+import { disconnectViewer } from "../realtime/socket.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
- * Prevents raw Prisma / DB error details from leaking to the client.
- * Prisma errors carry a name like "PrismaClientValidationError" or a P-code.
+ * Only errors written to be read by users (RegistrationError, VerifyError,
+ * NotificationError) pass their message through. Everything else — Prisma,
+ * network, SDK failures — may carry hostnames, SQL or stack details, so the
+ * client gets the generic fallback instead.
  */
 export function safeMessage(
   err: unknown,
   fallback = "Something went wrong. Please try again.",
 ): string {
-  const e = err as { name?: string; code?: string; message?: string };
-  if (typeof e?.name === "string" && e.name.startsWith("PrismaClient"))
-    return fallback;
-  if (typeof e?.code === "string" && /^P\d{4}$/.test(e.code)) return fallback;
-  return e?.message ?? fallback;
+  if (
+    err instanceof RegistrationError ||
+    err instanceof VerifyError ||
+    err instanceof NotificationError
+  ) {
+    return err.message;
+  }
+  return fallback;
 }
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
 const draftInitSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(254),
-  password: z.string().min(8).max(200),
+  password: newPasswordSchema,
 });
+
+/**
+ * The shop details a client may write to its draft. Unknown keys are dropped,
+ * so a client can never set the server-managed fields (phoneNumber, which only
+ * changes through the OTP flow, and logoUrl, which only comes from our upload).
+ */
+const draftDataSchema = z
+  .object({
+    shopName: z.string().trim().min(2).max(120),
+    shopCategory: z.string().trim().min(2).max(60),
+    address: z.string().trim().min(2).max(200),
+    city: z.string().trim().min(2).max(100),
+    state: z.string().trim().min(2).max(100),
+    pincode: z.string().regex(/^\d{6}$/),
+    shopAddress: z.string().trim().max(400),
+    description: z.string().trim().max(1000),
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
+  })
+  .partial();
+
+const draftIdSchema = z.string().min(1).max(64);
 
 const draftUpdateSchema = z.object({
   step: z.number().int().min(1).max(4),
-  data: z.record(z.string(), z.unknown()),
+  data: draftDataSchema,
 });
 
 const phoneSchema = z.object({
@@ -55,36 +89,31 @@ const phoneSchema = z.object({
 });
 
 const sendOtpSchema = z.object({
-  draftId: z.string().min(1),
+  draftId: draftIdSchema,
   phoneNumber: z.string().regex(/^[6-9]\d{9}$/, "Invalid Indian mobile number"),
 });
 
 const verifyOtpSchema = z.object({
-  draftId: z.string().min(1),
+  draftId: draftIdSchema,
   code: z.string().length(6),
 });
 
 const createOrderSchema = z.object({
-  draftId: z.string().min(1),
+  draftId: draftIdSchema,
   planType: z.enum(["1m", "2m", "3m"]),
 });
 
 const verifyPaymentSchema = z.object({
-  draftId: z.string().min(1),
+  draftId: draftIdSchema,
   planType: z.enum(["1m", "2m", "3m"]),
-  razorpayOrderId: z.string().min(1),
-  razorpayPaymentId: z.string().min(1),
-  razorpaySignature: z.string().min(1),
+  razorpayOrderId: z.string().min(1).max(64),
+  razorpayPaymentId: z.string().min(1).max(64),
+  razorpaySignature: z.string().min(1).max(256),
 });
 
 const uploadLogoSchema = z.object({
-  draftId: z.string().min(1),
-  image: z
-    .string()
-    .refine(
-      (s) => /^data:image\/(jpeg|jpg|png|webp);base64,/.test(s),
-      "Only JPEG, PNG, or WebP images are accepted",
-    ),
+  draftId: draftIdSchema,
+  image: imageDataUriSchema,
 });
 
 const loginSchema = z.object({
@@ -125,9 +154,14 @@ export async function updateDraft(req: Request, res: Response): Promise<void> {
     res.status(400).json({ message: "Invalid request" });
     return;
   }
+  const draftId = draftIdSchema.safeParse(req.params.draftId);
+  if (!draftId.success) {
+    res.status(400).json({ message: "Invalid request" });
+    return;
+  }
   try {
     await updateShopkeeperDraft(
-      req.params.draftId as string,
+      draftId.data,
       parsed.data.step,
       parsed.data.data,
     );
@@ -276,7 +310,7 @@ export async function verifyPayment(
     );
     res.json({
       message: "Payment verified. Registration complete.",
-      token: signShopkeeperToken(registration.shopkeeperId),
+      token: signShopkeeperToken(registration.shopkeeperId, 0),
       shopkeeperId: registration.shopkeeperId,
       shopId: registration.shopId,
       roomId: registration.roomId,
@@ -285,14 +319,8 @@ export async function verifyPayment(
     });
   } catch (err) {
     console.error("Payment verify:", (err as Error)?.message);
-    const e = err as Error;
-    const isBadRequest =
-      e?.message?.includes("signature") ||
-      e?.message?.includes("Draft") ||
-      e?.message?.includes("not verified") ||
-      e?.message?.includes("expired");
     res
-      .status(isBadRequest ? 400 : 500)
+      .status(err instanceof RegistrationError ? err.status : 500)
       .json({
         message: safeMessage(
           err,
@@ -365,14 +393,16 @@ export async function uploadLogo(req: Request, res: Response): Promise<void> {
     return;
   }
   try {
+    // Check the draft first so strangers can't use this endpoint as a free image host.
+    await assertDraftActive(parsed.data.draftId);
     const logoUrl = await uploadLogoToCloudinary(parsed.data.image);
     await updateShopkeeperDraft(parsed.data.draftId, 2, { logoUrl });
     res.json({ logoUrl });
   } catch (err) {
     console.error("Logo upload:", (err as Error)?.message);
     res
-      .status(500)
-      .json({ message: "Failed to upload logo. Please try again." });
+      .status(err instanceof RegistrationError ? err.status : 500)
+      .json({ message: safeMessage(err, "Failed to upload logo. Please try again.") });
   }
 }
 
@@ -388,26 +418,72 @@ export async function loginShopkeeper(
   try {
     const shopkeeper = await prisma.shopkeeper.findUnique({
       where: { email: parsed.data.email },
+      select: { id: true, shopName: true, passwordHash: true, tokenVersion: true },
     });
-    if (!shopkeeper) {
+    // Compares even when the email is unknown, so timing doesn't reveal which emails exist.
+    const valid = await verifyPassword(parsed.data.password, shopkeeper?.passwordHash);
+    if (!shopkeeper || !valid) {
       res.status(401).json({ message: "Invalid email or password" });
       return;
     }
-    const valid = await bcrypt.compare(
-      parsed.data.password,
-      shopkeeper.passwordHash,
-    );
-    if (!valid) {
-      res.status(401).json({ message: "Invalid email or password" });
-      return;
+    if (needsRehash(shopkeeper.passwordHash)) {
+      // Best effort: failing to upgrade the hash must not fail the login.
+      await hashPassword(parsed.data.password)
+        .then((passwordHash) =>
+          prisma.shopkeeper.update({ where: { id: shopkeeper.id }, data: { passwordHash } }),
+        )
+        .catch(() => undefined);
     }
     res.json({
-      token: signShopkeeperToken(shopkeeper.id),
+      token: signShopkeeperToken(shopkeeper.id, shopkeeper.tokenVersion),
       shopkeeperId: shopkeeper.id,
       shopName: shopkeeper.shopName,
     });
   } catch (err) {
     console.error("Shopkeeper login:", (err as Error)?.message);
     res.status(500).json({ message: "Login failed. Please try again." });
+  }
+}
+
+// ── POST /api/shopkeeper/logout-all ───────────────────────────────────────────
+// Invalidates every session of the account, including the one making the call.
+
+export async function logoutAllShopkeeperHandler(req: Request, res: Response): Promise<void> {
+  await revokeSessions("shopkeeper", req.shopkeeperId!);
+  disconnectViewer(`SK:${req.shopkeeperId}`);
+  res.json({ message: "Signed out everywhere" });
+}
+
+// ── DELETE /api/shopkeeper/me ─────────────────────────────────────────────────
+// Permanently deletes the shopkeeper, their shop and room, and all of their
+// notification data. Requires the account password again.
+
+const deleteAccountSchema = z.object({ password: z.string().min(1).max(200) });
+
+export async function deleteShopkeeperAccountHandler(req: Request, res: Response): Promise<void> {
+  const shopkeeperId = req.shopkeeperId!;
+  const parsed = deleteAccountSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ message: "Password is required" });
+    return;
+  }
+
+  try {
+    const shopkeeper = await prisma.shopkeeper.findUnique({
+      where: { id: shopkeeperId },
+      select: { passwordHash: true },
+    });
+    const confirmed = await verifyPassword(parsed.data.password, shopkeeper?.passwordHash);
+    if (!shopkeeper || !confirmed) {
+      res.status(403).json({ message: "Could not confirm your identity" });
+      return;
+    }
+
+    await deleteShopkeeperAccount(shopkeeperId);
+    disconnectViewer(`SK:${shopkeeperId}`);
+    res.json({ message: "Your account has been deleted" });
+  } catch (err) {
+    console.error("Shopkeeper delete:", (err as Error)?.message);
+    res.status(500).json({ message: "Could not delete the account. Please try again." });
   }
 }

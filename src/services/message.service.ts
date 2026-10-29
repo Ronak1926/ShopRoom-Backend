@@ -306,7 +306,27 @@ async function canModifyMessage(
   return !seenByOther;
 }
 
+/** A reaction is one short emoji sequence, never free text. */
+export function isValidReactionEmoji(emoji: string): boolean {
+  return (
+    emoji.length <= 32 &&
+    [...emoji].length <= 8 &&
+    !/[\p{Cc}\p{Cs}\s]/u.test(emoji) &&
+    /\p{Extended_Pictographic}|\p{Regional_Indicator}|⃣/u.test(emoji)
+  );
+}
+
+/** Message ids from other rooms must be indistinguishable from ids that don't exist. */
+async function assertMessageInRoom(roomId: string, messageId: string): Promise<void> {
+  const found = await prisma.message.findFirst({
+    where: { id: messageId, roomId },
+    select: { id: true },
+  });
+  if (!found) throw new Error("Message not found");
+}
+
 export async function editMessage(
+  roomId: string,
   messageId: string,
   text: string,
   ctx: SenderContext,
@@ -321,7 +341,7 @@ export async function editMessage(
       deletedForEveryone: true,
     },
   });
-  if (!row) throw new Error("Message not found");
+  if (!row || row.roomId !== roomId) throw new Error("Message not found");
 
   const senderViewerKey = row.customerId ?? `SK:${row.shopkeeperId}`;
   if (senderViewerKey !== viewerKeyOf(ctx)) throw new Error("Not your message");
@@ -345,6 +365,7 @@ export async function editMessage(
  * same rules as editing, and clears any reactions on it.
  */
 export async function deleteMessage(
+  roomId: string,
   messageId: string,
   scope: "everyone" | "me",
   ctx: SenderContext,
@@ -352,6 +373,7 @@ export async function deleteMessage(
   const viewerKey = viewerKeyOf(ctx);
 
   if (scope === "me") {
+    await assertMessageInRoom(roomId, messageId);
     await prisma.messageHiddenFor.upsert({
       where: { messageId_viewerKey: { messageId, viewerKey } },
       create: { messageId, viewerKey },
@@ -370,7 +392,7 @@ export async function deleteMessage(
       deletedForEveryone: true,
     },
   });
-  if (!row) throw new Error("Message not found");
+  if (!row || row.roomId !== roomId) throw new Error("Message not found");
   if (row.deletedForEveryone) return;
 
   const senderViewerKey = row.customerId ?? `SK:${row.shopkeeperId}`;
@@ -391,10 +413,13 @@ export async function deleteMessage(
 /** Toggle a reaction: same emoji again removes it, a different emoji replaces
  * it. Returns the message's refreshed flat reaction list. */
 export async function reactToMessage(
+  roomId: string,
   messageId: string,
   emoji: string,
   ctx: SenderContext,
 ): Promise<MessageDTO["reactions"]> {
+  if (!isValidReactionEmoji(emoji)) throw new Error("Invalid reaction");
+  await assertMessageInRoom(roomId, messageId);
   const viewerKey = viewerKeyOf(ctx);
   const existing = await prisma.messageReaction.findUnique({
     where: { messageId_viewerKey: { messageId, viewerKey } },

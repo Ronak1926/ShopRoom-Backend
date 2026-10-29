@@ -1,5 +1,5 @@
 /**
- * routes/shopkeeper.ts — Route declarations for shopkeeper endpoints.
+ * routes/shopkeeper.ts ï¿½ Route declarations for shopkeeper endpoints.
  * All handler logic lives in controllers/shopkeeper.controller.ts.
  */
 
@@ -16,17 +16,33 @@ import {
   handleWebhook,
   uploadLogo,
   loginShopkeeper,
+  logoutAllShopkeeperHandler,
+  deleteShopkeeperAccountHandler,
 } from "../controllers/shopkeeper.controller.js";
+import { requireShopkeeperAuth } from "../middleware/shopkeeperAuth.js";
+import {
+  accountDeletionLimiter,
+  draftInitAccountLimiter,
+  draftLimiter,
+  logoUploadLimiter,
+  loginAccountLimiter,
+  loginIpLimiter,
+  paymentLimiter,
+  phoneOtpSendIpLimiter,
+} from "../middleware/rateLimiters.js";
 
 // -- Rate limiters -------------------------------------------------------------
+
+const MAX_KEY_LENGTH = 64;
 
 /** 3 OTP send requests per phone per 10 minutes. */
 const otpSendLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 3,
-  keyGenerator: (req) =>
-    (req.body as { phoneNumber?: string })?.phoneNumber ??
-    ipKeyGenerator(req.ip ?? ""),
+  keyGenerator: (req) => {
+    const phone = (req.body as { phoneNumber?: unknown } | undefined)?.phoneNumber;
+    return typeof phone === "string" ? phone.slice(0, MAX_KEY_LENGTH) : ipKeyGenerator(req.ip ?? "");
+  },
   message: { message: "Too many OTP requests. Please wait 10 minutes and try again." },
   standardHeaders: true,
   legacyHeaders: false,
@@ -36,8 +52,10 @@ const otpSendLimiter = rateLimit({
 const otpVerifyLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 10,
-  keyGenerator: (req) =>
-    (req.body as { draftId?: string })?.draftId ?? ipKeyGenerator(req.ip ?? ""),
+  keyGenerator: (req) => {
+    const draftId = (req.body as { draftId?: unknown } | undefined)?.draftId;
+    return typeof draftId === "string" ? draftId.slice(0, MAX_KEY_LENGTH) : ipKeyGenerator(req.ip ?? "");
+  },
   message: { message: "Too many verification attempts. Please wait 10 minutes." },
   standardHeaders: true,
   legacyHeaders: false,
@@ -47,13 +65,26 @@ const otpVerifyLimiter = rateLimit({
 
 export const shopkeeperRouter = Router();
 
-shopkeeperRouter.post("/draft/init", initDraft);
-shopkeeperRouter.put("/draft/:draftId", updateDraft);
-shopkeeperRouter.post("/validate-phone", validatePhone);
-shopkeeperRouter.post("/phone/send-otp", otpSendLimiter, sendPhoneOtpHandler);
-shopkeeperRouter.post("/phone/verify-otp", otpVerifyLimiter, verifyPhoneOtpHandler);
-shopkeeperRouter.post("/payment/create-order", createPaymentOrder);
-shopkeeperRouter.post("/payment/verify", verifyPayment);
+shopkeeperRouter.post("/draft/init", draftLimiter, draftInitAccountLimiter, initDraft);
+shopkeeperRouter.put("/draft/:draftId", draftLimiter, updateDraft);
+shopkeeperRouter.post("/validate-phone", draftLimiter, validatePhone);
+shopkeeperRouter.post(
+  "/phone/send-otp",
+  phoneOtpSendIpLimiter,
+  otpSendLimiter,
+  sendPhoneOtpHandler,
+);
+shopkeeperRouter.post("/phone/verify-otp", draftLimiter, otpVerifyLimiter, verifyPhoneOtpHandler);
+shopkeeperRouter.post("/payment/create-order", paymentLimiter, createPaymentOrder);
+shopkeeperRouter.post("/payment/verify", paymentLimiter, verifyPayment);
 shopkeeperRouter.post("/payment/webhook", handleWebhook);
-shopkeeperRouter.post("/upload-logo", uploadLogo);
-shopkeeperRouter.post("/login", loginShopkeeper);
+shopkeeperRouter.post("/upload-logo", logoUploadLimiter, uploadLogo);
+shopkeeperRouter.post("/login", loginIpLimiter, loginAccountLimiter, loginShopkeeper);
+
+shopkeeperRouter.post("/logout-all", requireShopkeeperAuth, logoutAllShopkeeperHandler);
+shopkeeperRouter.delete(
+  "/me",
+  requireShopkeeperAuth,
+  accountDeletionLimiter,
+  deleteShopkeeperAccountHandler,
+);

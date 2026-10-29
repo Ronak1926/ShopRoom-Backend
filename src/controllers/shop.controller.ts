@@ -13,7 +13,8 @@ import {
   joinRoom,
   leaveRoom,
 } from "../services/room.service.js";
-import { getIO } from "../realtime/socket.js";
+import { getIO, removeViewerFromRoom } from "../realtime/socket.js";
+import { imageDataUriSchema } from "../schemas/imageUpload.schema.js";
 import { buildInviteLink } from "../utils/inviteCode.js";
 import { uploadImageToCloudinary } from "../lib/cloudinary.js";
 import { parseBody } from "../utils/validate.js";
@@ -469,11 +470,8 @@ export async function leaveShopRoom(
 
   try {
     await leaveRoom(roomId, customerId);
-    try {
-      getIO().to(roomId).emit("member:left", { roomId, customerId });
-    } catch {
-      // Socket.IO server not initialized (e.g. in a test harness) — fine to skip.
-    }
+    // Their open sockets must stop receiving the room's live traffic too.
+    removeViewerFromRoom(customerId, roomId);
     res.json({ message: "Left the room" });
   } catch (err: unknown) {
     const e = err as Error;
@@ -488,22 +486,24 @@ export async function leaveShopRoom(
 // Body: { logoBase64?: string; coverBase64?: string }
 // Auth: requireShopkeeperAuth
 
+const updateRoomImagesSchema = z
+  .object({
+    logoBase64: imageDataUriSchema.optional(),
+    coverBase64: imageDataUriSchema.optional(),
+  })
+  .refine((v) => v.logoBase64 || v.coverBase64);
+
 export async function updateRoomImages(
   req: Request,
   res: Response,
 ): Promise<void> {
   const shopkeeperId = req.shopkeeperId!;
-  const { logoBase64, coverBase64 } = req.body as {
-    logoBase64?: string;
-    coverBase64?: string;
-  };
-
-  if (!logoBase64 && !coverBase64) {
-    res
-      .status(400)
-      .json({ message: "Provide at least one of logoBase64 or coverBase64" });
+  const parsed = parseBody(req, updateRoomImagesSchema);
+  if (!parsed.ok) {
+    res.status(400).json({ message: "Provide a JPEG, PNG or WebP logoBase64 and/or coverBase64" });
     return;
   }
+  const { logoBase64, coverBase64 } = parsed.data;
 
   const shop = await prisma.shop.findUnique({
     where: { ownerId: shopkeeperId },

@@ -12,6 +12,7 @@ import { prisma } from "../database/prisma.js";
 import { firebaseMessaging } from "../lib/firebaseAdmin.js";
 import { NotificationError } from "../utils/notificationError.js";
 import { chunk, mapWithConcurrency } from "../utils/concurrency.js";
+import { isAllowedImageUrl } from "../utils/safeUrl.js";
 import type { CompositionNode } from "../schemas/notification.schema.js";
 import { validateDesign } from "./notificationValidation.service.js";
 import { resolveAudienceDevices, usesRadius } from "./notificationAudience.service.js";
@@ -64,7 +65,10 @@ interface DeviceOutcome {
  */
 function findHeroImageUrl(elements: CompositionNode[]): string | undefined {
   for (const node of elements) {
-    if (node.asset?.type === "IMAGE" && node.asset.url) return node.asset.url;
+    // Re-checked here as well as at save time: pinned versions can predate the host allow-list.
+    if (node.asset?.type === "IMAGE" && node.asset.url && isAllowedImageUrl(node.asset.url)) {
+      return node.asset.url;
+    }
     if (node.children?.length) {
       const found = findHeroImageUrl(node.children);
       if (found) return found;

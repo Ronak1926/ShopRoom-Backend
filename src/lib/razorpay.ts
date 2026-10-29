@@ -34,6 +34,7 @@
 
 import Razorpay from "razorpay";
 import crypto from "crypto";
+import { isProduction } from "../config/env.js";
 
 // ─── Client factory ───────────────────────────────────────────────────────────
 
@@ -80,6 +81,8 @@ export async function createRazorpayOrder(
   const client = getClient();
 
   if (!client) {
+    // Without credentials a "mock" order would let anyone register for free.
+    if (isProduction()) throw new Error("Payments are not configured");
     console.warn(
       `\n⚠️  [Razorpay] Credentials not configured — returning mock order.\n` +
         `   Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env\n` +
@@ -130,7 +133,8 @@ export function verifyPaymentSignature(
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
   if (!keySecret) {
-    // Dev fallback: skip verification when credentials are absent
+    // Dev fallback only: skipping verification in production would make every payment "valid".
+    if (isProduction()) return false;
     console.warn(
       "[Razorpay] KEY_SECRET not set — skipping signature verification in dev mode",
     );
@@ -174,10 +178,9 @@ export function verifyWebhookSignature(
   const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
   if (!webhookSecret) {
-    console.warn(
-      "[Razorpay] RAZORPAY_WEBHOOK_SECRET not set — skipping webhook signature verification",
-    );
-    return true;
+    // Fail closed everywhere: an unsigned webhook is indistinguishable from a forged one.
+    console.warn("[Razorpay] RAZORPAY_WEBHOOK_SECRET not set — rejecting webhook");
+    return false;
   }
 
   const expected = crypto
@@ -193,4 +196,36 @@ export function verifyWebhookSignature(
   } catch {
     return false;
   }
+}
+
+// ─── Order lookup ─────────────────────────────────────────────────────────────
+
+export interface RazorpayOrderSummary {
+  /** Paise; null for a dev mock order, which was never actually charged. */
+  amount: number | null;
+  receipt: string | null;
+}
+
+/**
+ * The order's real amount and receipt, as Razorpay recorded them when WE
+ * created it. A payment signature only proves some order was paid; this is how
+ * we confirm it was the order created for this draft and this plan, and not
+ * a cheaper one (or someone else's) replayed against a different registration.
+ */
+export async function fetchOrderSummary(orderId: string): Promise<RazorpayOrderSummary> {
+  const client = getClient();
+
+  if (!client) {
+    if (isProduction()) throw new Error("Payments are not configured");
+    // Dev mock orders (see createRazorpayOrder) encode their receipt in the id;
+    // the amount was never charged, so the caller's plan amount stands in.
+    const match = /^order_mock_(.+)_\d+$/.exec(orderId);
+    return { amount: null, receipt: match?.[1] ?? null };
+  }
+
+  const order = (await (client.orders.fetch(orderId) as unknown)) as {
+    amount: number | string;
+    receipt?: string | null;
+  };
+  return { amount: Number(order.amount), receipt: order.receipt ?? null };
 }

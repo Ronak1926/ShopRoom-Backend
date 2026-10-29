@@ -2,11 +2,16 @@ import "dotenv/config";
 
 import { createServer } from "http";
 
+import { assertProductionConfig } from "./config/env.js";
 import { app } from "./app.js";
 import { connectDatabase } from "./database/prisma.js";
 import { cleanupExpiredDrafts } from "./services/shopkeeper.service.js";
 import { createSocketServer } from "./realtime/socket.js";
 import { startNotificationScheduler } from "./services/notificationScheduler.service.js";
+import { startDataRetention } from "./services/dataRetention.service.js";
+
+// Refuse to run in production with missing or weak secrets (see config/env.ts).
+assertProductionConfig();
 
 // Socket.IO needs the raw http.Server, so it's created explicitly instead of
 // via the implicit server app.listen() would otherwise create.
@@ -23,4 +28,5 @@ connectDatabase().then(() => {
   });
 
   startNotificationScheduler();
+  startDataRetention();
 });

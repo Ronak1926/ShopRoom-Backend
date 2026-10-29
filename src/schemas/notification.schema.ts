@@ -17,6 +17,7 @@
  */
 
 import z from "zod";
+import { isAllowedImageUrl, isSafeLinkUrl } from "../utils/safeUrl.js";
 
 export const SCHEMA_VERSION = 2;
 
@@ -40,16 +41,26 @@ export const NODE_TYPES = [
 ] as const;
 export const NodeTypeSchema = z.enum(NODE_TYPES);
 
+/** Image sources are limited to hosts ShopRoom trusts (see utils/safeUrl.ts). */
+const imageUrl = z.string().max(2048).refine(isAllowedImageUrl, {
+  message: "Image URL must be an https link from an allowed image host",
+});
+
+/** Links shown to or opened by customers: public http(s) URLs without credentials. */
+const linkUrl = z.string().max(2048).refine(isSafeLinkUrl, {
+  message: "Must be a public http(s) URL",
+});
+
 /** Reference to a ShopRoom-owned decorative asset (SVG art, image, or Lottie). */
 export const AssetRefSchema = z.object({
   type: z.enum(["SVG", "IMAGE", "LOTTIE"]).default("SVG"),
   assetId: z.string().max(120).optional(),
-  url: z.string().url().max(2048).optional(),
+  url: imageUrl.optional(),
   naturalWidth: z.number().finite().min(0).max(20000).optional(),
   naturalHeight: z.number().finite().min(0).max(20000).optional(),
   attribution: z.object({
     photographer: z.string().max(200).optional(),
-    photographerUrl: z.string().url().max(2048).optional(),
+    photographerUrl: linkUrl.optional(),
     provider: z.enum(["PEXELS", "UNSPLASH"]).optional(),
   }).optional(),
 });
@@ -194,7 +205,7 @@ export const BackgroundSchema = z.object({
   color: colorString.optional(),
   gradient: GradientSchema.optional(),
   assetId: z.string().max(64).optional(),
-  imageUrl: z.string().url().max(2048).optional(),
+  imageUrl: imageUrl.optional(),
   opacity: num.min(0).max(1).optional(),
   blur: num.min(0).max(400).optional(),
   overlayColor: colorString.optional(),
@@ -332,10 +343,14 @@ export const ActionSchema = z
   .object({
     type: z.enum(ACTION_TYPES),
     target: z.string().max(256).optional(),
-    url: z.string().url().max(2048).optional(),
+    url: linkUrl.optional(),
   })
-  .refine((a) => a.type !== "OPEN_URL" || (!!a.url && /^https?:\/\//i.test(a.url)), {
-    message: "OPEN_URL requires a valid http(s) url",
+  .refine((a) => a.type !== "OPEN_URL" || !!a.url, {
+    message: "OPEN_URL requires a public http(s) url",
+    path: ["url"],
+  })
+  .refine((a) => a.type === "OPEN_URL" || a.url === undefined, {
+    message: "Only OPEN_URL actions may carry a url",
     path: ["url"],
   });
 

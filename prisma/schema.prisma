@@ -18,6 +18,8 @@ model Customer {
   longitude           Float?
   locationUpdatedAt   DateTime? // when latitude/longitude were last reported by the customer's device
   emailVerified       Boolean   @default(false)
+  /// Bumped to invalidate every session issued before it (sign out everywhere).
+  tokenVersion        Int       @default(0)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -35,9 +37,12 @@ model Customer {
 model EmailOtp {
   id        String   @id @default(cuid())
   email     String
+  /// HMAC of the 6-digit code — the code itself is never stored.
   code      String
   expiresAt DateTime
   used      Boolean  @default(false)
+  /// Wrong guesses so far; the code is burned once this reaches the cap.
+  attempts  Int      @default(0)
   createdAt DateTime @default(now())
 
   @@index([email])
@@ -75,8 +80,10 @@ model Shopkeeper {
   planType          String
   planExpiresAt     DateTime
   // ── Razorpay payment fields ─────────────────────────────────────────────────
-  razorpayOrderId   String? // Razorpay order ID (order_xxx) created before checkout
-  razorpayPaymentId String? // Razorpay payment ID (pay_xxx) captured after success
+  razorpayOrderId   String? @unique // Razorpay order ID (order_xxx) created before checkout
+  razorpayPaymentId String? @unique // Razorpay payment ID (pay_xxx); unique so one payment can only ever buy one account
+  /// Bumped to invalidate every session issued before it (sign out everywhere).
+  tokenVersion      Int      @default(0)
   // ── Stripe (commented out — replaced by Razorpay) ──────────────────────────
   // stripePaymentId String?
   createdAt         DateTime @default(now())

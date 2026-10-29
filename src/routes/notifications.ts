@@ -27,6 +27,8 @@
  *     GET    /capabilities            — plan-derived feature flags
  *   Validation
  *     POST   /validate-design         — validate a design document
+ *   Send
+ *     POST   /send                    — dispatch a design to a room as a push notification
  */
 
 import { Router } from "express";
@@ -58,6 +60,7 @@ import {
   listCategories,
   getCapabilities,
 } from "../controllers/notificationCategory.controller.js";
+import { sendNotificationHandler } from "../controllers/notificationSend.controller.js";
 
 // ── Rate limiters ───────────────────────────────────────────────────────────────
 
@@ -87,6 +90,16 @@ const stockImageLimiter = rateLimit({
   max: 30,
   keyGenerator: (req) => req.shopkeeperId ?? ipKeyGenerator(req.ip ?? ""),
   message: { message: "Too many searches. Please slow down." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/** Sending fans out to every room member's devices — keep it tightly bounded. */
+const sendLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.shopkeeperId ?? ipKeyGenerator(req.ip ?? ""),
+  message: { message: "Too many sends. Please wait a minute." },
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -125,3 +138,6 @@ notificationsRouter.get("/capabilities", getCapabilities);
 
 // Validation
 notificationsRouter.post("/validate-design", validateDesign);
+
+// Send
+notificationsRouter.post("/send", sendLimiter, sendNotificationHandler);

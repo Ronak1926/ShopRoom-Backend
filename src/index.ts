@@ -11,6 +11,7 @@ import { shopRouter } from "./routes/shop.js";
 import { roomsRouter } from "./routes/rooms.js";
 import { messagesRouter } from "./routes/messages.js";
 import { notificationsRouter } from "./routes/notifications.js";
+import { notificationDeliveryRouter } from "./routes/notificationDelivery.js";
 import { connectDatabase } from "./database/prisma.js";
 import { cleanupExpiredDrafts } from "./services/shopkeeper.service.js";
 import { createSocketServer } from "./realtime/socket.js";
@@ -39,6 +40,13 @@ app.use("/api/shopkeeper", shopkeeperRouter);
 app.use("/api/shop", shopRouter);
 app.use("/api/rooms", roomsRouter);
 app.use("/api/rooms", messagesRouter);
+// notificationDeliveryRouter must be mounted BEFORE notificationsRouter: both
+// share the /api/notifications prefix, and notificationsRouter applies
+// requireShopkeeperAuth unconditionally via .use() — that middleware runs for
+// every request reaching this prefix regardless of whether a route inside it
+// matches, so it would 401 customer requests before they ever reached the
+// other router if registered first.
+app.use("/api/notifications", notificationDeliveryRouter);
 app.use("/api/notifications", notificationsRouter);
 
 // Socket.IO needs the raw http.Server, so it's created explicitly instead of

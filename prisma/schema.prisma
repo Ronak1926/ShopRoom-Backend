@@ -21,10 +21,11 @@ model Customer {
   updatedAt           DateTime @updatedAt
 
   // Relations
-  memberships     Membership[]
-  sentMessages    Message[]         @relation("MessageCustomerSender")
+  memberships      Membership[]
+  sentMessages     Message[]         @relation("MessageCustomerSender")
   messageReactions MessageReaction[]
   roomViewerStates RoomViewerState[]
+  devices          CustomerDevice[]
 }
 
 model EmailOtp {
@@ -84,6 +85,7 @@ model Shopkeeper {
   roomViewerStates    RoomViewerState[]
   notificationDesigns NotificationDesign[]
   notificationAssets  NotificationAsset[]
+  notificationSends   NotificationSend[]
 }
 
 // ─── Shop / Room ──────────────────────────────────────────────────────────────
@@ -128,11 +130,12 @@ model Room {
   shopId String @unique
   shop   Shop   @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
-  inviteCode   String       @unique
-  membersCount Int          @default(0)
-  memberships  Membership[]
-  messages     Message[]
-  viewerStates RoomViewerState[]
+  inviteCode        String             @unique
+  membersCount      Int                @default(0)
+  memberships       Membership[]
+  messages          Message[]
+  viewerStates      RoomViewerState[]
+  notificationSends NotificationSend[]
 
   // Media
   coverUrl String? // background/hero image for the room discover card
@@ -174,9 +177,9 @@ model Message {
 
   senderType   MessageSenderType
   customerId   String?
-  customer     Customer?   @relation("MessageCustomerSender", fields: [customerId], references: [id], onDelete: Cascade)
+  customer     Customer?         @relation("MessageCustomerSender", fields: [customerId], references: [id], onDelete: Cascade)
   shopkeeperId String?
-  shopkeeper   Shopkeeper? @relation("MessageShopkeeperSender", fields: [shopkeeperId], references: [id], onDelete: Cascade)
+  shopkeeper   Shopkeeper?       @relation("MessageShopkeeperSender", fields: [shopkeeperId], references: [id], onDelete: Cascade)
 
   text      String
   createdAt DateTime @default(now())
@@ -199,9 +202,9 @@ model Message {
 /// either a customer member or the shop's own owner. Re-reacting with the
 /// same emoji removes it (toggle); a different emoji replaces it.
 model MessageReaction {
-  id           String  @id @default(cuid())
+  id           String      @id @default(cuid())
   messageId    String
-  message      Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  message      Message     @relation(fields: [messageId], references: [id], onDelete: Cascade)
   viewerKey    String
   customerId   String?
   customer     Customer?   @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -232,9 +235,9 @@ model MessageHiddenFor {
 /// used to gate the edit/delete-for-everyone "seen" rule, plus the
 /// "cleared at" boundary for that participant's own Clear Chat.
 model RoomViewerState {
-  id           String  @id @default(cuid())
+  id           String      @id @default(cuid())
   roomId       String
-  room         Room    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  room         Room        @relation(fields: [roomId], references: [id], onDelete: Cascade)
   viewerKey    String
   customerId   String?
   customer     Customer?   @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -243,7 +246,7 @@ model RoomViewerState {
 
   lastReadAt DateTime?
   clearedAt  DateTime?
-  updatedAt  DateTime @updatedAt
+  updatedAt  DateTime  @updatedAt
 
   @@unique([roomId, viewerKey])
   @@index([roomId, lastReadAt])
@@ -286,19 +289,19 @@ model NotificationCategory {
 
 /// ShopRoom-provided starting design. Cloned into a shopkeeper-owned design.
 model NotificationTemplate {
-  id            String  @id @default(cuid())
-  slug          String  @unique
+  id            String               @id @default(cuid())
+  slug          String               @unique
   name          String
   categoryId    String
   category      NotificationCategory @relation(fields: [categoryId], references: [id])
   designJson    Json
   thumbnailUrl  String?
-  schemaVersion Int     @default(1)
+  schemaVersion Int                  @default(1)
   requiredPlan  String? // null = available on every plan; else "1m" | "2m" | "3m"
-  isActive      Boolean @default(true)
-  sortOrder     Int     @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  isActive      Boolean              @default(true)
+  sortOrder     Int                  @default(0)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
 
   designs NotificationDesign[]
 
@@ -333,13 +336,15 @@ model NotificationDesign {
 
 /// Immutable snapshot for restore/rollback. Written on explicit save-version.
 model NotificationDesignVersion {
-  id         String   @id @default(cuid())
+  id         String             @id @default(cuid())
   designId   String
   design     NotificationDesign @relation(fields: [designId], references: [id], onDelete: Cascade)
   version    Int
   designJson Json
   createdBy  String // shopkeeperId that created the snapshot
-  createdAt  DateTime @default(now())
+  createdAt  DateTime           @default(now())
+
+  sends NotificationSend[]
 
   @@unique([designId, version])
   @@index([designId])
@@ -367,7 +372,7 @@ model NotificationAnimation {
 
 /// Image/media uploaded by a shopkeeper. designJson stores only the reference.
 model NotificationAsset {
-  id                 String   @id @default(cuid())
+  id                 String     @id @default(cuid())
   shopkeeperId       String
   shopkeeper         Shopkeeper @relation(fields: [shopkeeperId], references: [id], onDelete: Cascade)
   cloudinaryPublicId String
@@ -376,7 +381,74 @@ model NotificationAsset {
   height             Int?
   mimeType           String?
   sizeBytes          Int?
-  createdAt          DateTime @default(now())
+  createdAt          DateTime   @default(now())
 
   @@index([shopkeeperId])
+}
+
+// ─── Push Notification Delivery ─────────────────────────────────────────────────
+// Device registration + send/dispatch records. The design itself stays in
+// NotificationDesign/NotificationDesignVersion above — these models only track
+// where a design was delivered to and what happened when it was sent.
+
+enum DevicePlatform {
+  WEB
+  ANDROID
+  IOS
+}
+
+/// One row per browser/device registration. fcmToken is globally unique —
+/// re-registering the same browser under a different account reassigns it
+/// via upsert-by-token, which is correct: the device belongs to whoever is
+/// currently logged in on it.
+model CustomerDevice {
+  id         String         @id @default(cuid())
+  customerId String
+  customer   Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  fcmToken   String         @unique
+  platform   DevicePlatform @default(WEB)
+  userAgent  String?
+  lastSeenAt DateTime       @default(now())
+  createdAt  DateTime       @default(now())
+
+  @@index([customerId])
+}
+
+enum NotificationSendStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+/// Matches the frontend's existing audience modes even though v1 backend logic
+/// only implements ROOM_MEMBERS — keeps the column forward compatible.
+enum NotificationAudienceMode {
+  ROOM_MEMBERS
+  NEARBY
+  MEMBERS_NEARBY
+}
+
+/// One shopkeeper click of "Send". Pinned to an immutable
+/// NotificationDesignVersion so later edits to the live design never change
+/// what was actually delivered. v1 tracks aggregate counts only.
+model NotificationSend {
+  id              String                    @id @default(cuid())
+  shopkeeperId    String
+  shopkeeper      Shopkeeper                @relation(fields: [shopkeeperId], references: [id], onDelete: Cascade)
+  roomId          String
+  room            Room                      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  designVersionId String
+  designVersion   NotificationDesignVersion @relation(fields: [designVersionId], references: [id], onDelete: Restrict)
+  audience        NotificationAudienceMode  @default(ROOM_MEMBERS)
+  message         String?
+  status          NotificationSendStatus    @default(PENDING)
+  recipientCount  Int                       @default(0)
+  successCount    Int                       @default(0)
+  failureCount    Int                       @default(0)
+  sentAt          DateTime?
+  createdAt       DateTime                  @default(now())
+
+  @@index([shopkeeperId])
+  @@index([roomId])
+  @@index([designVersionId])
 }

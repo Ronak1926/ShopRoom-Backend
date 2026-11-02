@@ -30,6 +30,8 @@ jobs:
           --health-retries 10
     env:
       TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/shoproom_test
+      # prisma.config.ts requires a URL even for `prisma generate`, which never connects.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/shoproom_test
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

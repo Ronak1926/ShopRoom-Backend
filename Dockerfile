@@ -17,6 +17,9 @@ RUN pnpm install --frozen-lockfile
 COPY prisma ./prisma
 COPY prisma.config.ts tsconfig.json tsconfig.build.json ./
 COPY src ./src
+# prisma.config.ts requires a URL even for `prisma generate`, which never connects.
+# An ARG, so the placeholder does not end up in the image's environment.
+ARG DATABASE_URL=postgresql://build:build@localhost:5432/build
 RUN pnpm exec prisma generate && pnpm build
 
 FROM node:24-slim AS runtime

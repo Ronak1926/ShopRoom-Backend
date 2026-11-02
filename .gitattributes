@@ -1,0 +1,5 @@
+# Scripts and container files must keep LF line endings even when checked out on Windows.
+.githooks/* text eol=lf
+*.sh text eol=lf
+*.mjs text eol=lf
+Dockerfile text eol=lf

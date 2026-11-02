@@ -7,6 +7,7 @@ import { globalLimiter } from "./middleware/rateLimiters.js";
 import { requestLogger } from "./middleware/requestLogger.js";
 import { opsRouter } from "./routes/ops.js";
 import { clientErrorsRouter } from "./routes/clientErrors.js";
+import { publicRouter } from "./routes/public.js";
 import { securityHeaders } from "./middleware/securityHeaders.js";
 import { customersRouter } from "./routes/customers.js";
 import { otpRouter } from "./routes/otp.js";
@@ -85,6 +86,7 @@ export const routeMounts: { prefix: string; router: Router }[] = [
   { prefix: "/api/notifications", router: notificationDeliveryRouter },
   { prefix: "/api/notifications", router: notificationsRouter },
   { prefix: "/api/client-errors", router: clientErrorsRouter },
+  { prefix: "/api/public", router: publicRouter },
 ];
 /** Every router, including the monitoring one mounted earlier; used by tests to inventory routes. */
 export const allRouteMounts = [{ prefix: "", router: opsRouter }, ...routeMounts];

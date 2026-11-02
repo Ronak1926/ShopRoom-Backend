@@ -19,6 +19,9 @@ import { mapWithConcurrency } from "../utils/concurrency.js";
 import { nextRunAfter } from "../utils/scheduleRecurrence.js";
 import { kindFromLegs, usesRadius } from "./notificationAudience.service.js";
 import { dispatchSend } from "./notificationDispatch.service.js";
+import { isPlanActive } from "./billing.service.js";
+import { getSendRules } from "./notificationPreferences.service.js";
+import { blockedBy, type BlockReason } from "../utils/quietHours.js";
 import { specFromSchedule } from "./notificationSchedule.service.js";
 import { reserveSend, type NewSend } from "./notificationUsage.service.js";
 import { logger } from "../lib/logger.js";
@@ -57,7 +60,7 @@ const scheduleSelect = {
   endMode: true,
   endDate: true,
   endAfter: true,
-  shopkeeper: { select: { planType: true } },
+  shopkeeper: { select: { planType: true, planExpiresAt: true } },
 } as const;
 
 async function claimDueSchedules(now: Date): Promise<string[]> {
@@ -92,9 +95,9 @@ async function recordFailedSend(send: NewSend, failureReason: string): Promise<v
   }
 }
 
-async function deliver(sendId: string, speed: "STANDARD" | "PRIORITY", joinedBefore?: Date) {
+async function deliver(sendId: string, speed: "STANDARD" | "PRIORITY", joinedBefore: Date | undefined, ttlHours: number) {
   try {
-    await dispatchSend(sendId, { deliverySpeed: speed, membersJoinedBefore: joinedBefore });
+    await dispatchSend(sendId, { deliverySpeed: speed, membersJoinedBefore: joinedBefore, ttlHours });
   } catch (err) {
     logger.error("Scheduled dispatch failed", err);
     notificationSends.inc({ status: "FAILED" });
@@ -120,6 +123,8 @@ async function runSchedule(scheduleId: string): Promise<void> {
 
   const occurrence = schedule.nextRunAt;
   const now = new Date();
+  const rules = await getSendRules(schedule.shopkeeperId);
+  let blocked: BlockReason | null = null;
   const missed = now.getTime() - occurrence.getTime() > MISSED_GRACE_MS;
   const kind = kindFromLegs(schedule.includeMembers, schedule.includeNearby);
 
@@ -137,6 +142,14 @@ async function runSchedule(scheduleId: string): Promise<void> {
   if (missed) {
     schedulerRuns.inc({ result: "missed" });
     await recordFailedSend(send, "MISSED_WINDOW");
+  } else if (!isPlanActive(schedule.shopkeeper.planExpiresAt, now)) {
+    // The series carries on; its occurrences resume sending once the plan is renewed.
+    schedulerRuns.inc({ result: "plan_expired" });
+    await recordFailedSend(send, "PLAN_EXPIRED");
+  } else if ((blocked = blockedBy(rules, occurrence, schedule.timeZone))) {
+    // Rules can change after a schedule was made (or a recurrence can land on a weekend): skip, don't send.
+    schedulerRuns.inc({ result: blocked === "QUIET_HOURS" ? "quiet_hours" : "weekend_blocked" });
+    await recordFailedSend(send, blocked === "QUIET_HOURS" ? "QUIET_HOURS" : "WEEKEND_BLOCKED");
   } else {
     let sendId: string | null = null;
     try {
@@ -157,6 +170,7 @@ async function runSchedule(scheduleId: string): Promise<void> {
         sendId,
         schedule.deliverySpeed,
         schedule.includeFutureMembers ? undefined : schedule.createdAt,
+        rules.expiryHours,
       );
     }
   }

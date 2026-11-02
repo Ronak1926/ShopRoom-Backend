@@ -14,14 +14,18 @@ Last reviewed: 2026-10-30. Update this file in the same change that adds or alte
 | Chat messages | Both | `Message.text` (AES-256-GCM at rest) | Room chat | Until deleted by the sender, or the account/room is deleted | Account deletion (cascade) |
 | Push device token, user agent | Customer | `CustomerDevice` | Deliver push | Until sign-out/disable, 270 days without activity, or FCM reports it dead | Sign-out; retention job; account deletion |
 | Per-device delivery record (delivered/opened/clicked times, receipt token) | Customer | `NotificationSendRecipient` | Notification analytics | 180 days (the send keeps its aggregate counters) | Retention job; account deletion |
-| Razorpay order and payment ids | Shopkeeper | `Shopkeeper.razorpay*` | Reconcile payments, prevent reuse | Life of the account (finance may require longer; keep the ids, not card data) | Account deletion |
+| Razorpay order and payment ids | Shopkeeper | `Shopkeeper.razorpay*`, `PlanPayment` (plan, amount, ids; one row per sign-up or renewal) | Reconcile payments, prevent reuse, show billing history | Life of the account (finance may require longer; keep the ids, not card data) | Account deletion |
+| Password-reset token (SHA-256 hash only, never the token) | Customer, shopkeeper | `PasswordResetToken` | One-time password reset link | Valid 30 minutes; rows removed by the retention job 1 day after they expire | Retention job; account deletion |
+| Newsletter email | Public site visitor (may not have an account) | `NewsletterSubscriber.email` | Product updates the person asked for | Until they ask to be removed | Manual on request (no self-service unsubscribe yet) |
+| Contact-form message (name, email, subject, text) | Public site visitor | Not stored: relayed by email to `CONTACT_EMAIL` and kept only in that mailbox | Answer the enquiry | Per the support mailbox policy | Delete from the mailbox |
+| Notification preferences (quiet hours, weekend sending, expiry, studio defaults) | Shopkeeper | `NotificationPreference.settings` | Enforced on scheduled sends; studio defaults | Life of the account | Account deletion |
 | Notification designs, assets, send history | Shopkeeper | `NotificationDesign*`, `NotificationAsset`, `NotificationSend`, Cloudinary | The product | Life of the account | Account deletion (database and Cloudinary) |
 
 Card numbers and UPI details never reach ShopRoom; Razorpay Checkout handles them.
 
 ## Processors
 
-Twilio (phone OTP), Razorpay (payments), Firebase/Google (sign-in, push), Cloudinary (images), SMTP provider (email OTP), Pexels/Unsplash (stock-image search; queries only).
+Twilio (phone OTP), Razorpay (payments), Firebase/Google (sign-in, push), Cloudinary (images), SMTP provider (email OTP, password reset and contact messages), Pexels/Unsplash (stock-image search; queries only).
 
 ## Data-subject requests
 

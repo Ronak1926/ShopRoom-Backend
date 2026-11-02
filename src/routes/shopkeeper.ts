@@ -21,14 +21,24 @@ import {
 } from "../controllers/shopkeeper.controller.js";
 import { requireShopkeeperAuth } from "../middleware/shopkeeperAuth.js";
 import {
+  changePasswordHandler,
+  forgotPasswordHandler,
+  resetPasswordHandler,
+} from "../controllers/accountPassword.controller.js";
+import { createRenewalOrderHandler, getBillingHandler, verifyRenewalHandler } from "../controllers/billing.controller.js";
+import {
   accountDeletionLimiter,
+  changePasswordLimiter,
   draftInitAccountLimiter,
   draftLimiter,
+  forgotPasswordAccountLimiter,
+  forgotPasswordIpLimiter,
   logoUploadLimiter,
   loginAccountLimiter,
   loginIpLimiter,
   paymentLimiter,
   phoneOtpSendIpLimiter,
+  resetPasswordLimiter,
   sharedStore,
 } from "../middleware/rateLimiters.js";
 
@@ -84,6 +94,12 @@ shopkeeperRouter.post("/payment/webhook", handleWebhook);
 shopkeeperRouter.post("/upload-logo", logoUploadLimiter, uploadLogo);
 shopkeeperRouter.post("/login", loginIpLimiter, loginAccountLimiter, loginShopkeeper);
 
+shopkeeperRouter.post("/forgot-password", forgotPasswordIpLimiter, forgotPasswordAccountLimiter, forgotPasswordHandler("SHOPKEEPER"));
+shopkeeperRouter.post("/reset-password", resetPasswordLimiter, resetPasswordHandler("SHOPKEEPER"));
+shopkeeperRouter.patch("/me/password", requireShopkeeperAuth, changePasswordLimiter, changePasswordHandler("SHOPKEEPER"));
+shopkeeperRouter.get("/billing", requireShopkeeperAuth, getBillingHandler);
+shopkeeperRouter.post("/billing/order", requireShopkeeperAuth, paymentLimiter, createRenewalOrderHandler);
+shopkeeperRouter.post("/billing/verify", requireShopkeeperAuth, paymentLimiter, verifyRenewalHandler);
 shopkeeperRouter.post("/logout-all", requireShopkeeperAuth, logoutAllShopkeeperHandler);
 shopkeeperRouter.delete(
   "/me",

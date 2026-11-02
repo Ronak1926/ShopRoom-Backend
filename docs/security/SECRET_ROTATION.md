@@ -14,7 +14,10 @@ The server refuses to start with `NODE_ENV=production` unless the secrets marked
 | `TWILIO_ACCOUNT_SID` / `AUTH_TOKEN` / `VERIFY_SERVICE_SID` | yes | Twilio console | Prefer an API key over the account auth token. |
 | `FIREBASE_PROJECT_ID` / `CLIENT_EMAIL` / `PRIVATE_KEY` | yes | Google Cloud → service account → keys | Create a new key, deploy, then delete the old key. |
 | `CLOUDINARY_*` | for uploads | Cloudinary console | |
-| `SMTP_*` | for email OTP | mail provider | Use an app password, not the account password. |
+| `SMTP_*` | for email OTP, password reset, contact form | mail provider | Use an app password, not the account password. |
+| `FRONTEND_BASE_URL` | yes | n/a | Public address of the web app (no trailing slash). Password-reset and invite links are built from it; the API refuses to start in production without it. |
+| `CONTACT_EMAIL` | optional | n/a | Inbox for the contact form; falls back to `SMTP_USER`. The form answers 503 when neither is set. |
+| `APP_TIMEZONE` | optional | n/a | Time zone for daily send limits and analytics days (default `Asia/Kolkata`). |
 | `PEXELS_API_KEY`, `UNSPLASH_ACCESS_KEY` | optional | provider | |
 | `CORS_ORIGINS` | yes | n/a | Comma-separated front-end origins; no wildcard. |
 | `TRUST_PROXY_HOPS` | behind a proxy | n/a | Set to the number of proxies in front of the API so client IPs (and rate limits) are correct. |

@@ -89,6 +89,24 @@ export const registerLimiter = limiter(
   "Too many sign-up attempts. Please try again later.",
 );
 
+const FORGOT_MESSAGE = "Too many reset requests. Please wait a few minutes and try again.";
+export const forgotPasswordIpLimiter = limiter("forgot-ip", 60 * MINUTE, 10, FORGOT_MESSAGE);
+export const forgotPasswordAccountLimiter = limiter(
+  "forgot-account",
+  60 * MINUTE,
+  3,
+  FORGOT_MESSAGE,
+  (req) => `forgot:${bodyField(req, "email")}`,
+);
+export const resetPasswordLimiter = limiter("reset-password", 15 * MINUTE, 10, "Too many attempts. Please wait a few minutes and try again.");
+export const changePasswordLimiter = limiter(
+  "change-password",
+  15 * MINUTE,
+  6,
+  "Too many attempts. Please wait a few minutes and try again.",
+  (req) => `change:${req.customerId ?? req.shopkeeperId ?? clientIp(req)}`,
+);
+
 export const googleAuthLimiter = limiter("google-auth", 15 * MINUTE, 40, LOGIN_MESSAGE);
 
 export const emailOtpSendIpLimiter = limiter(
@@ -153,4 +171,17 @@ export const accountDeletionLimiter = limiter(
   5,
   "Too many attempts. Please wait a few minutes and try again.",
   (req) => `delete:${req.customerId ?? req.shopkeeperId ?? clientIp(req)}`,
+);
+
+export const contactLimiter = limiter(
+  "contact",
+  60 * MINUTE,
+  5,
+  "You've sent several messages already. Please try again later.",
+);
+export const newsletterLimiter = limiter(
+  "newsletter",
+  60 * MINUTE,
+  10,
+  "Too many sign-up attempts. Please try again later.",
 );

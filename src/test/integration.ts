@@ -116,6 +116,11 @@ export async function createShop(
     },
     select: { id: true, shopName: true },
   });
+  // Open rules (no quiet hours, weekends allowed) so tests do not depend on the time of day;
+  // tests of the rules themselves save their own.
+  await prisma.notificationPreference.create({
+    data: { shopkeeperId: shopkeeper.id, settings: { quietFrom: "00:00", quietTo: "00:00", weekendSending: true, expiryHours: 24 } },
+  });
   const shop = await prisma.shop.create({
     data: {
       ownerId: shopkeeper.id,

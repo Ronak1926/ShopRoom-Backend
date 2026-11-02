@@ -14,6 +14,7 @@ const completeEnv = {
   JWT_SECRET: "x".repeat(40),
   DATABASE_URL: "postgres://db",
   CORS_ORIGINS: "https://shoproom.example",
+  FRONTEND_BASE_URL: "https://shoproom.example",
   RAZORPAY_KEY_ID: "id",
   RAZORPAY_KEY_SECRET: "secret",
   RAZORPAY_WEBHOOK_SECRET: "whsec",

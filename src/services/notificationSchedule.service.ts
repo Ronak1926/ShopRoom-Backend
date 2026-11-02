@@ -11,7 +11,9 @@ import { NotificationError } from "../utils/notificationError.js";
 import { nextRunAfter, type RecurrenceSpec } from "../utils/scheduleRecurrence.js";
 import type { CreateScheduleInput } from "../schemas/notificationScheduleRequest.schema.js";
 import { pinDesignVersion, resolveDesignId } from "./notificationDesignPin.service.js";
-import { assertShopHasLocation, loadSenderContext } from "./notificationSender.service.js";
+import { assertPlanActive, assertShopHasLocation, loadSenderContext } from "./notificationSender.service.js";
+import { getSendRules } from "./notificationPreferences.service.js";
+import { BLOCK_MESSAGES, blockedBy } from "../utils/quietHours.js";
 
 /** A shop can't queue an unbounded backlog for the worker. */
 export const MAX_LIVE_SCHEDULES = 50;
@@ -110,6 +112,7 @@ export async function createSchedule(
 ): Promise<{ id: string; nextRunAt: string }> {
   const { audience, schedule } = input;
   const sender = await loadSenderContext(shopkeeperId);
+  assertPlanActive(sender);
   if (audience.includeNearby) assertShopHasLocation(sender);
 
   // Occurrences live on the wall clock at minute precision.
@@ -132,6 +135,10 @@ export async function createSchedule(
   };
   const nextRunAt = nextRunAfter(spec, now);
   if (!nextRunAt) throw NotificationError.badRequest("Pick a time in the future.");
+
+  // Quiet hours and weekend sending are the shopkeeper's own rules; refuse a first run that already breaks them.
+  const blocked = blockedBy(await getSendRules(shopkeeperId), nextRunAt, schedule.timeZone);
+  if (blocked) throw NotificationError.badRequest(BLOCK_MESSAGES[blocked]);
 
   const live = await prisma.notificationSchedule.count({
     where: { shopkeeperId, status: { in: ["ACTIVE", "PAUSED"] } },

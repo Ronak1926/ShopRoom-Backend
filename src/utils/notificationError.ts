@@ -25,6 +25,10 @@ export class NotificationError extends Error {
     return new NotificationError(400, message);
   }
 
+  static paymentRequired(message = "Payment required") {
+    return new NotificationError(402, message);
+  }
+
   static tooManyRequests(message = "Limit reached") {
     return new NotificationError(429, message);
   }

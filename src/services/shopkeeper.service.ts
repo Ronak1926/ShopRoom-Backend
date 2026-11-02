@@ -17,6 +17,7 @@ import type { RegistrationResult } from "../types/index.js";
 import { Prisma } from "../generated/client.js";
 import { hashPassword, verifyPassword } from "../utils/password.js";
 import { RegistrationError } from "../utils/registrationError.js";
+import { PLANS, isPlanId, planEndsAt } from "./plans.js";
 
 const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -189,12 +190,6 @@ export function receiptFor(draftId: string): string {
   return `sk_${draftId.slice(-10)}`;
 }
 
-const PLAN_AMOUNTS: Record<string, number> = {
-  "1m": 39900, // ₹399 in paise
-  "2m": 59900, // ₹599
-  "3m": 89900, // ₹899
-};
-
 /**
  * Creates a Razorpay order for the selected plan.
  *
@@ -212,10 +207,9 @@ export async function createOrder(draftId: string, planType: string) {
   if (draft.expiresAt < new Date()) throw new RegistrationError("Draft expired");
   if (!draft.phoneVerified) throw new RegistrationError("Phone number not verified");
 
-  const amount = PLAN_AMOUNTS[planType];
-  if (!amount) throw new RegistrationError("Invalid plan type");
+  if (!isPlanId(planType)) throw new RegistrationError("Invalid plan type");
 
-  return createRazorpayOrder(amount, receiptFor(draftId));
+  return createRazorpayOrder(PLANS[planType].amount, receiptFor(draftId));
 }
 
 /** The paid order must be the one created for this draft, at this plan's price. */
@@ -227,7 +221,7 @@ export function assertOrderMatchesPlan(
   if (order.receipt !== receiptFor(draftId)) {
     throw new RegistrationError("This payment does not belong to this registration");
   }
-  if (order.amount !== null && order.amount !== PLAN_AMOUNTS[planType]) {
+  if (order.amount !== null && (!isPlanId(planType) || order.amount !== PLANS[planType].amount)) {
     throw new RegistrationError("The amount paid does not match the selected plan");
   }
 }
@@ -284,9 +278,8 @@ export async function verifyPaymentAndRegister(
   const data = draft.data as Record<string, unknown>;
 
   // ── 3. Calculate plan expiry ─────────────────────────────────────────────────
-  const PLAN_DAYS: Record<string, number> = { "1m": 30, "2m": 60, "3m": 90 };
-  const days = PLAN_DAYS[planType] ?? 30;
-  const planExpiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+  if (!isPlanId(planType)) throw new RegistrationError("Invalid plan type");
+  const planExpiresAt = planEndsAt(planType, null);
 
   // ── 4–7. Atomic transaction ──────────────────────────────────────────────────
   let result;
@@ -309,6 +302,18 @@ export async function verifyPaymentAndRegister(
           logoUrl: (data.logoUrl as string) ?? null,
           planType,
           planExpiresAt,
+          razorpayOrderId,
+          razorpayPaymentId,
+        },
+      });
+
+      // 4a-ii. Ledger entry: this payment can never buy anything else
+      await tx.planPayment.create({
+        data: {
+          shopkeeperId: shopkeeper.id,
+          purpose: "REGISTRATION",
+          planType,
+          amount: PLANS[planType].amount,
           razorpayOrderId,
           razorpayPaymentId,
         },

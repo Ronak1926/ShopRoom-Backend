@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { parseBody } from "../utils/validate.js";
 import { ReceiptSchema } from "../schemas/notificationReceipt.schema.js";
-import { getSendDesign } from "../services/notificationDelivery.service.js";
+import { getFeed, getSendDesign } from "../services/notificationDelivery.service.js";
 import { recordReceipt } from "../services/notificationReceipt.service.js";
 import { handleControllerError, requireIdParam } from "./notificationResponse.js";
 
@@ -30,5 +30,15 @@ export async function recordReceiptHandler(req: Request, res: Response): Promise
     res.status(204).end();
   } catch (err) {
     handleControllerError(res, err, "Failed to record receipt");
+  }
+}
+
+// GET /api/notifications/feed — the signed-in customer's recent notifications
+export async function getFeedHandler(req: Request, res: Response): Promise<void> {
+  try {
+    res.set("Cache-Control", "private, no-cache");
+    res.json({ data: await getFeed(req.customerId!) });
+  } catch (err) {
+    handleControllerError(res, err, "Failed to load notifications");
   }
 }

@@ -34,6 +34,25 @@ async function consentedPosition(customerId: string): Promise<Position | null> {
 
 const roundKm = (km: number) => Math.round(km * 10) / 10;
 
+const ACTIVE_WINDOW_MS = 24 * 3_600_000;
+
+/** Which of these rooms had a chat message or a notification in the last day. */
+async function activeTodayAmong(roomIds: string[], now = new Date()): Promise<Set<string>> {
+  if (roomIds.length === 0) return new Set();
+  const since = new Date(now.getTime() - ACTIVE_WINDOW_MS);
+  const [messages, sends] = await Promise.all([
+    prisma.message.groupBy({
+      by: ["roomId"],
+      where: { roomId: { in: roomIds }, createdAt: { gte: since }, deletedForEveryone: false },
+    }),
+    prisma.notificationSend.groupBy({
+      by: ["roomId"],
+      where: { roomId: { in: roomIds }, createdAt: { gte: since }, status: "SENT" },
+    }),
+  ]);
+  return new Set([...messages, ...sends].map((row) => row.roomId));
+}
+
 // ── Discover ──────────────────────────────────────────────────────────────────
 
 export interface DiscoverQuery {
@@ -109,7 +128,7 @@ export async function discoverRooms(customerId: string, query: DiscoverQuery) {
   }
 
   const pageIds = rows.map((room) => room.id);
-  const [total, joined, trendingRows, categoryRows] = await Promise.all([
+  const [total, joined, trendingRows, categoryRows, activeToday] = await Promise.all([
     prisma.room.count({ where: categoryFilter }),
     pageIds.length
       ? prisma.membership.findMany({ where: { customerId, roomId: { in: pageIds } }, select: { roomId: true } })
@@ -120,6 +139,7 @@ export async function discoverRooms(customerId: string, query: DiscoverQuery) {
       select: { id: true, membersCount: true, shop: { select: { shopName: true, category: true, logoUrl: true } } },
     }),
     prisma.shop.groupBy({ by: ["category"], orderBy: { category: "asc" } }),
+    activeTodayAmong(pageIds),
   ]);
   const joinedIds = new Set(joined.map((m) => m.roomId));
 
@@ -140,8 +160,7 @@ export async function discoverRooms(customerId: string, query: DiscoverQuery) {
       inviteCode: room.inviteCode,
       city: room.shop.city,
       distanceKm: km === null ? null : roundKm(km),
-      likes: 200, // static for now
-      activeNow: true, // static for now
+      activeToday: activeToday.has(room.id),
       isJoined: joinedIds.has(room.id),
     };
   });

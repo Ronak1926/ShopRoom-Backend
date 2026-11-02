@@ -34,6 +34,66 @@ model Customer {
   @@index([latitude, longitude])
 }
 
+enum PlanPaymentPurpose {
+  REGISTRATION
+  RENEWAL
+}
+
+/// Every plan payment ever accepted. Order and payment ids are unique across the whole
+/// table, so a captured payment can only ever buy one thing — a renewal cannot be
+/// faked by replaying an earlier payment (Shopkeeper keeps only the registration ids).
+model PlanPayment {
+  id                String             @id @default(cuid())
+  shopkeeperId      String
+  shopkeeper        Shopkeeper         @relation(fields: [shopkeeperId], references: [id], onDelete: Cascade)
+  purpose           PlanPaymentPurpose
+  planType          String
+  /// Paise.
+  amount            Int
+  razorpayOrderId   String             @unique
+  razorpayPaymentId String             @unique
+  createdAt         DateTime           @default(now())
+
+  @@index([shopkeeperId, createdAt(sort: Desc)])
+}
+
+/// A shopkeeper's notification defaults. The server enforces quietFrom, quietTo, weekendSending
+/// and expiryHours; everything else in settings is stored for the studio to apply as defaults.
+model NotificationPreference {
+  shopkeeperId String     @id
+  shopkeeper   Shopkeeper @relation(fields: [shopkeeperId], references: [id], onDelete: Cascade)
+  settings     Json
+  updatedAt    DateTime   @updatedAt
+}
+
+enum AccountRole {
+  CUSTOMER
+  SHOPKEEPER
+}
+
+/// A one-time "set a new password" link. Only a SHA-256 of the token is stored.
+/// accountId is not a foreign key because it points at one of two tables; account
+/// deletion and the retention job remove the rows.
+model PasswordResetToken {
+  id        String      @id @default(cuid())
+  role      AccountRole
+  accountId String
+  tokenHash String      @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime    @default(now())
+
+  @@index([role, accountId])
+  @@index([expiresAt])
+}
+
+/// Landing-page newsletter sign-ups. Nothing is sent from here yet; the list is kept so it can be.
+model NewsletterSubscriber {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  createdAt DateTime @default(now())
+}
+
 /// Hit counter for rate limits that must hold across several API instances (login, OTP,
 /// sign-up, payments). One row per limiter and client key; a row is reset when its window ends.
 model RateLimitCounter {
@@ -90,8 +150,8 @@ model Shopkeeper {
   planType          String
   planExpiresAt     DateTime
   // ── Razorpay payment fields ─────────────────────────────────────────────────
-  razorpayOrderId   String? @unique // Razorpay order ID (order_xxx) created before checkout
-  razorpayPaymentId String? @unique // Razorpay payment ID (pay_xxx); unique so one payment can only ever buy one account
+  razorpayOrderId   String?  @unique // Razorpay order ID (order_xxx) created before checkout
+  razorpayPaymentId String?  @unique // Razorpay payment ID (pay_xxx); unique so one payment can only ever buy one account
   /// Bumped to invalidate every session issued before it (sign out everywhere).
   tokenVersion      Int      @default(0)
   // ── Stripe (commented out — replaced by Razorpay) ──────────────────────────
@@ -100,14 +160,16 @@ model Shopkeeper {
   updatedAt         DateTime @updatedAt
 
   // Relations
-  shop                  Shop?
-  sentMessages          Message[]              @relation("MessageShopkeeperSender")
-  messageReactions      MessageReaction[]
-  roomViewerStates      RoomViewerState[]
-  notificationDesigns   NotificationDesign[]
-  notificationAssets    NotificationAsset[]
-  notificationSends     NotificationSend[]
-  notificationSchedules NotificationSchedule[]
+  shop                   Shop?
+  planPayments           PlanPayment[]
+  notificationPreference NotificationPreference?
+  sentMessages           Message[]               @relation("MessageShopkeeperSender")
+  messageReactions       MessageReaction[]
+  roomViewerStates       RoomViewerState[]
+  notificationDesigns    NotificationDesign[]
+  notificationAssets     NotificationAsset[]
+  notificationSends      NotificationSend[]
+  notificationSchedules  NotificationSchedule[]
 }
 
 // ─── Shop / Room ──────────────────────────────────────────────────────────────

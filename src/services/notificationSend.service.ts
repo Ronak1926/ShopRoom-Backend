@@ -8,7 +8,8 @@ import { prisma } from "../database/prisma.js";
 import { NotificationError } from "../utils/notificationError.js";
 import type { SendNotificationInput } from "../schemas/notificationSendRequest.schema.js";
 import { pinDesignVersion, resolveDesignId } from "./notificationDesignPin.service.js";
-import { assertShopHasLocation, loadSenderContext } from "./notificationSender.service.js";
+import { assertPlanActive, assertShopHasLocation, loadSenderContext } from "./notificationSender.service.js";
+import { getSendRules } from "./notificationPreferences.service.js";
 import { assertUnderDailyLimit, reserveSend } from "./notificationUsage.service.js";
 import { dispatchSend } from "./notificationDispatch.service.js";
 import { usesRadius } from "./notificationAudience.service.js";
@@ -25,10 +26,12 @@ export async function sendNotification(
   input: SendNotificationInput,
 ): Promise<SendNotificationResult> {
   const sender = await loadSenderContext(shopkeeperId);
+  assertPlanActive(sender);
   const kind = input.audience.mode;
   if (usesRadius(kind)) assertShopHasLocation(sender);
 
   await assertUnderDailyLimit(shopkeeperId, sender.planType);
+  const { expiryHours } = await getSendRules(shopkeeperId);
 
   const designId = await resolveDesignId(shopkeeperId, input.source, input.notificationId);
   const { designVersionId } = await pinDesignVersion(shopkeeperId, designId);
@@ -46,7 +49,7 @@ export async function sendNotification(
   );
 
   try {
-    const result = await dispatchSend(send.id);
+    const result = await dispatchSend(send.id, { ttlHours: expiryHours });
     return { id: send.id, recipients: result.recipients };
   } catch (err) {
     logger.error("Dispatch failed", err);

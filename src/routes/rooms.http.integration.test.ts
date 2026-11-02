@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
-import { MUMBAI, createCustomer, createShop, integrationConfigured, resetDatabase } from "../test/integration.js";
+import { MUMBAI, createCustomer, createDesign, createShop, integrationConfigured, resetDatabase, sampleDesign } from "../test/integration.js";
 import { startTestApp, type TestApp } from "../test/http.js";
 import { haversineKm } from "../utils/geo.js";
 
@@ -141,13 +141,36 @@ describe("room discovery, map pins and member lists", { skip: !enabled }, () => 
       assert.deepEqual(byName, { Joined: true, Other: false });
     });
 
+    it("marks a room active today only when it really had a message or a notification in the last day", async () => {
+      await shop({ name: "Quiet", km: 1 });
+      const stale = await shop({ name: "Stale", km: 2 });
+      const chatty = await shop({ name: "Chatty", km: 3 });
+      const deleted = await shop({ name: "Deleted", km: 4 });
+      const notified = await shop({ name: "Notified", km: 5 });
+      const message = (roomId: string, shopkeeperId: string, hoursAgo: number, deletedForEveryone = false) =>
+        t.prisma.message.create({
+          data: { roomId, senderType: "SHOPKEEPER", shopkeeperId, text: "hi", deletedForEveryone, createdAt: new Date(Date.now() - hoursAgo * 3_600_000) },
+        });
+      await message(stale.roomId, stale.shopkeeperId, 30);
+      await message(chatty.roomId, chatty.shopkeeperId, 2);
+      await message(deleted.roomId, deleted.shopkeeperId, 2, true);
+      const design = await createDesign(t.prisma, notified.shopkeeperId);
+      const version = await t.prisma.notificationDesignVersion.create({ data: { designId: design, version: 1, designJson: sampleDesign(), createdBy: notified.shopkeeperId } });
+      await t.prisma.notificationSend.create({ data: { shopkeeperId: notified.shopkeeperId, roomId: notified.roomId, designVersionId: version.id, status: "SENT" } });
+
+      const { token } = await viewer();
+      const res = await discover(token);
+      const active = Object.fromEntries(res.json.rooms.map((r: { shopName: string; activeToday: boolean }) => [r.shopName, r.activeToday]));
+      assert.deepEqual(active, { Quiet: false, Stale: false, Chatty: true, Deleted: false, Notified: true });
+    });
+
     it("keeps the response shape the web app reads", async () => {
       await shop({ name: "Shape", km: 1, members: 4 });
       const { token } = await viewer();
       const res = await discover(token);
       assert.deepEqual(Object.keys(res.json).sort(), ["categories", "limit", "page", "rooms", "total", "totalPages", "trending"]);
       assert.deepEqual(Object.keys(res.json.rooms[0]).sort(), [
-        "activeNow", "category", "city", "coverUrl", "distanceKm", "inviteCode", "isJoined", "likes", "logoUrl", "membersCount", "roomId", "shopName",
+        "activeToday", "category", "city", "coverUrl", "distanceKm", "inviteCode", "isJoined", "logoUrl", "membersCount", "roomId", "shopName",
       ]);
     });
   });

@@ -17,6 +17,11 @@ const PUBLIC_ROUTES = new Set([
   "POST /api/customers/login",
   "POST /api/customers/google-auth",
   "POST /api/shopkeeper/login",
+  // forgot / reset password: the whole point is that the caller cannot sign in
+  "POST /api/customers/forgot-password",
+  "POST /api/customers/reset-password",
+  "POST /api/shopkeeper/forgot-password",
+  "POST /api/shopkeeper/reset-password",
   // email OTP (before an account exists)
   "POST /api/otp/send",
   "POST /api/otp/verify",
@@ -35,6 +40,9 @@ const PUBLIC_ROUTES = new Set([
   "GET /api/shop/invite/:code",
   // authenticated by a per-device secret token
   "POST /api/notifications/receipts",
+  // public site forms: bounded input, rate limited, nothing about any account is revealed
+  "POST /api/public/contact",
+  "POST /api/public/newsletter",
   // monitors and error intake: no user data, bounded and rate limited
   "GET /healthz",
   "GET /readyz",

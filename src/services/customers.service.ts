@@ -302,6 +302,7 @@ export async function deleteCustomerAccount(customerId: string): Promise<string[
         data: { membersCount: { decrement: 1 } },
       });
     }
+    await tx.passwordResetToken.deleteMany({ where: { role: "CUSTOMER", accountId: customerId } });
     await tx.customer.delete({ where: { id: customerId } });
     return ids;
   });

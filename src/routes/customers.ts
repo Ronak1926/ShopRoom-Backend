@@ -17,11 +17,20 @@ import {
 } from "../controllers/customerDevice.controller.js";
 import { requireCustomerAuth } from "../middleware/customerAuth.js";
 import {
+  changePasswordHandler,
+  forgotPasswordHandler,
+  resetPasswordHandler,
+} from "../controllers/accountPassword.controller.js";
+import {
   accountDeletionLimiter,
+  changePasswordLimiter,
+  forgotPasswordAccountLimiter,
+  forgotPasswordIpLimiter,
   googleAuthLimiter,
   loginAccountLimiter,
   loginIpLimiter,
   registerLimiter,
+  resetPasswordLimiter,
 } from "../middleware/rateLimiters.js";
 
 /** Clients throttle themselves to one report per half hour; this is the server-side backstop. */
@@ -47,3 +56,6 @@ customersRouter.post("/me/devices", requireCustomerAuth, registerDeviceHandler);
 customersRouter.delete("/me/devices", requireCustomerAuth, unregisterDeviceHandler);
 customersRouter.post("/login", loginIpLimiter, loginAccountLimiter, loginCustomerHandler);
 customersRouter.post("/google-auth", googleAuthLimiter, googleAuthCustomerHandler);
+customersRouter.post("/forgot-password", forgotPasswordIpLimiter, forgotPasswordAccountLimiter, forgotPasswordHandler("CUSTOMER"));
+customersRouter.post("/reset-password", resetPasswordLimiter, resetPasswordHandler("CUSTOMER"));
+customersRouter.patch("/me/password", requireCustomerAuth, changePasswordLimiter, changePasswordHandler("CUSTOMER"));

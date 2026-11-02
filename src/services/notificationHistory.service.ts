@@ -5,9 +5,11 @@
  */
 
 import { prisma } from "../database/prisma.js";
+import type { Prisma } from "../generated/client.js";
 
 export interface SendHistoryItem {
   id: string;
+  designId: string;
   createdAt: string;
   sentAt: string | null;
   status: "PENDING" | "SENT" | "FAILED";
@@ -25,13 +27,66 @@ export interface SendHistoryItem {
   clickedCount: number;
 }
 
+export const HISTORY_OUTCOMES = ["all", "delivered", "opened", "clicked", "failed"] as const;
+export const HISTORY_SORTS = ["latest", "oldest", "opens", "clicks"] as const;
+
+export interface HistoryQuery {
+  page: number;
+  limit: number;
+  outcome?: (typeof HISTORY_OUTCOMES)[number];
+  sort?: (typeof HISTORY_SORTS)[number];
+  /** Matches the message or the design's name. */
+  q?: string;
+  /** Only sends from the last N days. */
+  days?: number;
+}
+
+/** Prisma hands `contains` to LIKE as-is, so `%`, `_` and `\` in a search must be escaped to match literally. */
+const escapeLike = (text: string): string => text.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+function whereFor(shopkeeperId: string, query: HistoryQuery): Prisma.NotificationSendWhereInput {
+  const where: Prisma.NotificationSendWhereInput = { shopkeeperId };
+  switch (query.outcome) {
+    case "failed":
+      where.status = "FAILED";
+      break;
+    case "delivered":
+      where.status = "SENT";
+      where.deliveredCount = { gt: 0 };
+      break;
+    case "opened":
+      where.openedCount = { gt: 0 };
+      break;
+    case "clicked":
+      where.clickedCount = { gt: 0 };
+      break;
+  }
+  if (query.q) {
+    const needle = escapeLike(query.q);
+    where.OR = [
+      { message: { contains: needle, mode: "insensitive" } },
+      { designVersion: { design: { name: { contains: needle, mode: "insensitive" } } } },
+    ];
+  }
+  if (query.days) where.createdAt = { gte: new Date(Date.now() - query.days * 86_400_000) };
+  return where;
+}
+
+const ORDER: Record<(typeof HISTORY_SORTS)[number], Prisma.NotificationSendOrderByWithRelationInput[]> = {
+  latest: [{ createdAt: "desc" }, { id: "desc" }],
+  oldest: [{ createdAt: "asc" }, { id: "asc" }],
+  opens: [{ openedCount: "desc" }, { createdAt: "desc" }],
+  clicks: [{ clickedCount: "desc" }, { createdAt: "desc" }],
+};
+
 export async function listSends(
   shopkeeperId: string,
-  query: { page: number; limit: number },
+  query: HistoryQuery,
 ): Promise<{ items: SendHistoryItem[]; total: number; page: number; limit: number }> {
+  const where = whereFor(shopkeeperId, query);
   const [rows, total] = await Promise.all([
     prisma.notificationSend.findMany({
-      where: { shopkeeperId },
+      where,
       select: {
         id: true,
         createdAt: true,
@@ -48,13 +103,13 @@ export async function listSends(
         deliveredCount: true,
         openedCount: true,
         clickedCount: true,
-        designVersion: { select: { design: { select: { name: true } } } },
+        designVersion: { select: { design: { select: { id: true, name: true } } } },
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: ORDER[query.sort ?? "latest"],
       take: query.limit,
       skip: (query.page - 1) * query.limit,
     }),
-    prisma.notificationSend.count({ where: { shopkeeperId } }),
+    prisma.notificationSend.count({ where }),
   ]);
 
   const items = rows.map(({ designVersion, scheduleId, createdAt, sentAt, ...rest }) => ({
@@ -62,6 +117,7 @@ export async function listSends(
     createdAt: createdAt.toISOString(),
     sentAt: sentAt?.toISOString() ?? null,
     scheduled: scheduleId !== null,
+    designId: designVersion.design.id,
     designName: designVersion.design.name,
   }));
   return { items, total, page: query.page, limit: query.limit };

@@ -38,6 +38,7 @@
  */
 
 import { Router } from "express";
+import { getPreferencesHandler, savePreferencesHandler } from "../controllers/notificationPreferences.controller.js";
 import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import { requireShopkeeperAuth } from "../middleware/shopkeeperAuth.js";
 import {
@@ -68,6 +69,7 @@ import {
 } from "../controllers/notificationCategory.controller.js";
 import {
   sendNotificationHandler,
+  analyticsHandler,
   listSendsHandler,
 } from "../controllers/notificationSend.controller.js";
 import {
@@ -160,6 +162,8 @@ notificationsRouter.post("/templates/:id/use", useTemplate);
 notificationsRouter.get("/animations", listAnimations);
 notificationsRouter.get("/categories", listCategories);
 notificationsRouter.get("/capabilities", getCapabilities);
+notificationsRouter.get("/preferences", getPreferencesHandler);
+notificationsRouter.put("/preferences", scheduleLimiter, savePreferencesHandler);
 
 // Validation
 notificationsRouter.post("/validate-design", validateDesign);
@@ -167,6 +171,7 @@ notificationsRouter.post("/validate-design", validateDesign);
 // Send
 notificationsRouter.post("/send", sendLimiter, sendNotificationHandler);
 notificationsRouter.get("/sends", listSendsHandler);
+notificationsRouter.get("/analytics", analyticsHandler);
 
 // Schedules
 notificationsRouter.post("/schedules", scheduleLimiter, createScheduleHandler);

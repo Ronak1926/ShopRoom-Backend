@@ -48,3 +48,60 @@ export async function getSendDesign(customerId: string, sendId: string) {
     },
   };
 }
+
+export const FEED_DAYS = 30;
+export const FEED_LIMIT = 20;
+
+export interface FeedItem {
+  sendId: string;
+  roomId: string;
+  shopName: string;
+  message: string | null;
+  sentAt: string;
+  /** True once any of the customer's devices opened it. */
+  read: boolean;
+  /** Presented back to /receipts when the notification is replayed, so opens are counted like a tap. */
+  receiptToken: string;
+}
+
+/**
+ * The customer's recent notifications for the bell: pushes that were actually
+ * addressed to them (one row per send even if they have several devices),
+ * newest first.
+ */
+export async function getFeed(customerId: string, now = new Date()): Promise<{ items: FeedItem[]; unread: number }> {
+  const since = new Date(now.getTime() - FEED_DAYS * 86_400_000);
+  // Several devices mean several rows per send; fetch a bounded multiple and fold them.
+  const rows = await prisma.notificationSendRecipient.findMany({
+    where: { customerId, status: "SENT", send: { status: "SENT", createdAt: { gte: since } } },
+    orderBy: { send: { createdAt: "desc" } },
+    take: FEED_LIMIT * 5,
+    select: {
+      sendId: true,
+      receiptToken: true,
+      openedAt: true,
+      send: { select: { roomId: true, message: true, createdAt: true, room: { select: { shop: { select: { shopName: true } } } } } },
+    },
+  });
+
+  const bySend = new Map<string, FeedItem>();
+  for (const row of rows) {
+    const existing = bySend.get(row.sendId);
+    if (existing) {
+      if (row.openedAt) existing.read = true;
+      continue;
+    }
+    if (bySend.size >= FEED_LIMIT) continue;
+    bySend.set(row.sendId, {
+      sendId: row.sendId,
+      roomId: row.send.roomId,
+      shopName: row.send.room.shop.shopName,
+      message: row.send.message,
+      sentAt: row.send.createdAt.toISOString(),
+      read: row.openedAt !== null,
+      receiptToken: row.receiptToken,
+    });
+  }
+  const items = [...bySend.values()];
+  return { items, unread: items.filter((item) => !item.read).length };
+}

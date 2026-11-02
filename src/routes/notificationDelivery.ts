@@ -9,6 +9,7 @@ import { Router } from "express";
 import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import { requireCustomerAuth } from "../middleware/customerAuth.js";
 import {
+  getFeedHandler,
   getSendDesignHandler,
   recordReceiptHandler,
 } from "../controllers/notificationDelivery.controller.js";
@@ -25,5 +26,6 @@ const receiptLimiter = rateLimit({
 
 export const notificationDeliveryRouter = Router();
 
+notificationDeliveryRouter.get("/feed", requireCustomerAuth, getFeedHandler);
 notificationDeliveryRouter.get("/sends/:id/design", requireCustomerAuth, getSendDesignHandler);
 notificationDeliveryRouter.post("/receipts", receiptLimiter, recordReceiptHandler);

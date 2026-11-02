@@ -6,13 +6,18 @@
 
 import { prisma } from "../database/prisma.js";
 import { NotificationError } from "../utils/notificationError.js";
+import { isPlanActive } from "./billing.service.js";
 
 export interface SenderContext {
   roomId: string;
   shopName: string;
   planType: string;
+  /** False once the subscription has run out: sends and schedules are refused until it is renewed. */
+  planActive: boolean;
   hasCoordinates: boolean;
 }
+
+export const PLAN_EXPIRED_MESSAGE = "Your plan has expired. Renew it in Billing to send notifications again.";
 
 export async function loadSenderContext(shopkeeperId: string): Promise<SenderContext> {
   const shop = await prisma.shop.findUnique({
@@ -21,7 +26,7 @@ export async function loadSenderContext(shopkeeperId: string): Promise<SenderCon
       shopName: true,
       latitude: true,
       longitude: true,
-      owner: { select: { planType: true } },
+      owner: { select: { planType: true, planExpiresAt: true } },
       room: { select: { id: true } },
     },
   });
@@ -31,8 +36,13 @@ export async function loadSenderContext(shopkeeperId: string): Promise<SenderCon
     roomId: shop.room.id,
     shopName: shop.shopName,
     planType: shop.owner.planType,
+    planActive: isPlanActive(shop.owner.planExpiresAt),
     hasCoordinates: shop.latitude !== null && shop.longitude !== null,
   };
+}
+
+export function assertPlanActive(sender: SenderContext): void {
+  if (!sender.planActive) throw NotificationError.paymentRequired(PLAN_EXPIRED_MESSAGE);
 }
 
 export function assertShopHasLocation(sender: SenderContext): void {

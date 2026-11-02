@@ -25,7 +25,7 @@ const FCM_CONCURRENCY = 4;
 const DB_BATCH_SIZE = 5_000;
 const DB_CONCURRENCY = 4;
 /** A promo that arrives a day late is worse than one that never arrives. */
-const PUSH_TTL_SECONDS = 24 * 60 * 60;
+const DEFAULT_TTL_HOURS = 24;
 
 const INVALID_TOKEN_CODES = new Set([
   "messaging/registration-token-not-registered",
@@ -38,6 +38,8 @@ export interface DispatchOptions {
   /** Leaves out members who joined after this instant (schedules that exclude future members). */
   membersJoinedBefore?: Date;
   deliverySpeed?: DeliverySpeedValue;
+  /** How long the push service keeps an undelivered push (the shopkeeper's "expiry" preference). Default 24. */
+  ttlHours?: number;
 }
 
 export interface DispatchResult {
@@ -84,6 +86,7 @@ function buildMessage(
   recipient: PlannedRecipient,
   base: Record<string, string>,
   speed: DeliverySpeedValue,
+  ttlSeconds: number,
 ): Message {
   const priority = speed === "PRIORITY" ? "high" : "normal";
   // Data-only on purpose: with a top-level `notification` field Firebase's own
@@ -92,8 +95,8 @@ function buildMessage(
   return {
     token: recipient.fcmToken,
     data: { ...base, rt: recipient.receiptToken },
-    android: { priority, ttl: PUSH_TTL_SECONDS * 1000 },
-    webpush: { headers: { TTL: String(PUSH_TTL_SECONDS), Urgency: priority } },
+    android: { priority, ttl: ttlSeconds * 1000 },
+    webpush: { headers: { TTL: String(ttlSeconds), Urgency: priority } },
   };
 }
 
@@ -101,10 +104,11 @@ async function sendBatch(
   batch: PlannedRecipient[],
   base: Record<string, string>,
   speed: DeliverySpeedValue,
+  ttlSeconds: number,
 ): Promise<DeviceOutcome[]> {
   try {
     const response = await firebaseMessaging.sendEach(
-      batch.map((r) => buildMessage(r, base, speed)),
+      batch.map((r) => buildMessage(r, base, speed, ttlSeconds)),
     );
     return response.responses.map((r, i) => ({
       recipientId: batch[i].id,
@@ -271,7 +275,7 @@ export async function dispatchSend(
   const batches = await mapWithConcurrency(
     chunk(planned, FCM_BATCH_SIZE),
     FCM_CONCURRENCY,
-    (batch) => sendBatch(batch, base, options.deliverySpeed ?? "STANDARD"),
+    (batch) => sendBatch(batch, base, options.deliverySpeed ?? "STANDARD", (options.ttlHours ?? DEFAULT_TTL_HOURS) * 3600),
   );
   const outcomes = batches.flat();
   await persistOutcomes(outcomes);

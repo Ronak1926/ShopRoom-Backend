@@ -14,7 +14,7 @@ import { getPlanCapabilities } from "./notificationPlan.service.js";
 
 const DEFAULT_TIME_ZONE = "Asia/Kolkata";
 
-function appTimeZone(): string {
+export function appTimeZone(): string {
   const configured = process.env.APP_TIMEZONE;
   return configured && isValidTimeZone(configured) ? configured : DEFAULT_TIME_ZONE;
 }

@@ -22,6 +22,7 @@ export const RETENTION = {
 } as const;
 
 export interface RetentionResult {
+  rateLimitCounters: number;
   emailOtps: number;
   stalePositions: number;
   deliveryRecords: number;
@@ -31,7 +32,9 @@ export interface RetentionResult {
 export async function purgeExpiredData(now = new Date()): Promise<RetentionResult> {
   const ago = (days: number) => new Date(now.getTime() - days * DAY_MS);
 
-  const [emailOtps, stalePositions, deliveryRecords, inactiveDevices] = await Promise.all([
+  const [rateLimitCounters, emailOtps, stalePositions, deliveryRecords, inactiveDevices] = await Promise.all([
+    // Windows are at most an hour long; an expired counter does nothing and is only clutter.
+    prisma.$executeRaw`DELETE FROM "RateLimitCounter" WHERE "resetAt" < now() - interval '1 hour'`,
     prisma.emailOtp.deleteMany({ where: { expiresAt: { lt: ago(RETENTION.emailOtpGraceDays) } } }),
     prisma.customer.updateMany({
       where: {
@@ -48,6 +51,7 @@ export async function purgeExpiredData(now = new Date()): Promise<RetentionResul
   ]);
 
   return {
+    rateLimitCounters,
     emailOtps: emailOtps.count,
     stalePositions: stalePositions.count,
     deliveryRecords: deliveryRecords.count,

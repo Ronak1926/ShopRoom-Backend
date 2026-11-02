@@ -127,9 +127,25 @@ function isRateLimited(socketId: string): boolean {
   return recent.length > RATE_LIMIT_MAX_MESSAGES;
 }
 
+/**
+ * Online-list broadcasts are coalesced per room. Every join or leave used to push
+ * the whole list to the whole room immediately, so N people opening a room at
+ * once (say, right after a push notification) cost O(N²) messages and delayed
+ * real chat traffic by seconds. Now at most one broadcast per room per window
+ * goes out, carrying the latest list.
+ */
+export const PRESENCE_WINDOW_MS = 500;
+const presenceTimers = new Map<string, NodeJS.Timeout>();
+
 function emitPresence(io: AppServer, roomId: string) {
-  const ids = Array.from(presenceByRoom.get(roomId) ?? []);
-  io.to(roomId).emit("presence:update", { roomId, onlineCustomerIds: ids });
+  if (presenceTimers.has(roomId)) return;
+  const timer = setTimeout(() => {
+    presenceTimers.delete(roomId);
+    const ids = Array.from(presenceByRoom.get(roomId) ?? []);
+    io.to(roomId).emit("presence:update", { roomId, onlineCustomerIds: ids });
+  }, PRESENCE_WINDOW_MS);
+  timer.unref();
+  presenceTimers.set(roomId, timer);
 }
 
 /** Room and message ids are short opaque strings; anything else is a malformed event. */

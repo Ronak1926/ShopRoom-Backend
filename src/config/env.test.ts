@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  dbPoolConfig,
   allowedOrigins,
   assertProductionConfig,
   isProduction,
@@ -68,6 +69,31 @@ describe("allowedOrigins", () => {
 
   it("allows no browser origin in production when unset", () => {
     assert.deepEqual(allowedOrigins({ NODE_ENV: "production" }), []);
+  });
+});
+
+describe("dbPoolConfig", () => {
+  it("has bounded defaults, including an acquire timeout", () => {
+    assert.deepEqual(dbPoolConfig({}), {
+      max: 10,
+      connectionTimeoutMillis: 5_000,
+      idleTimeoutMillis: 30_000,
+      statement_timeout: 30_000,
+    });
+  });
+
+  it("reads overrides", () => {
+    const config = dbPoolConfig({ DB_POOL_MAX: "25", DB_POOL_ACQUIRE_TIMEOUT_MS: "2000", DB_STATEMENT_TIMEOUT_MS: "60000" });
+    assert.equal(config.max, 25);
+    assert.equal(config.connectionTimeoutMillis, 2_000);
+    assert.equal(config.statement_timeout, 60_000);
+  });
+
+  it("ignores nonsense and out-of-range values", () => {
+    for (const bad of ["0", "-3", "abc", "", "1.5", "1000000"]) {
+      assert.equal(dbPoolConfig({ DB_POOL_MAX: bad }).max, 10, bad);
+    }
+    assert.equal(dbPoolConfig({ DB_POOL_ACQUIRE_TIMEOUT_MS: "5" }).connectionTimeoutMillis, 5_000, "never disable the timeout");
   });
 });
 

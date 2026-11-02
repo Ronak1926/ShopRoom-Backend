@@ -30,3 +30,28 @@ export async function mapWithConcurrency<T, R>(
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
   return results;
 }
+
+/** Prisma's code for "write conflict or deadlock, retry the transaction". */
+export function isTransientConflict(err: unknown): boolean {
+  return (err as { code?: unknown } | null)?.code === "P2034";
+}
+
+/**
+ * Re-runs `fn` when it fails with a transient database conflict (deadlock or
+ * serialization failure), waiting a short, growing, jittered delay between
+ * attempts. Any other error, or the last conflict, is thrown unchanged.
+ */
+export async function retryOnConflict<T>(
+  fn: () => Promise<T>,
+  { attempts = 4, baseDelayMs = 25, shouldRetry = isTransientConflict } = {},
+): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt >= attempts || !shouldRetry(err)) throw err;
+      const delay = baseDelayMs * 2 ** (attempt - 1) * (0.5 + Math.random());
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}

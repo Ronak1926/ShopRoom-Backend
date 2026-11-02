@@ -111,8 +111,24 @@ describe("data retention", { skip: !enabled }, () => {
     assert.equal(await prisma.customerDevice.count({ where: { id: dormant.deviceIds[0] } }), 0);
   });
 
+  it("removes rate-limit counters an hour after their window ended, and only those", async () => {
+    await prisma.rateLimitCounter.deleteMany();
+    // Inserted with SQL: a JS Date written to a timestamptz through the model API is shifted by the session's UTC offset.
+    await prisma.$executeRaw`
+      INSERT INTO "RateLimitCounter" ("key", "hits", "resetAt") VALUES
+        ('t:long-expired', 5, now() - interval '2 hours'),
+        ('t:just-expired', 5, now() - interval '1 minute'),
+        ('t:active', 5, now() + interval '10 minutes')`;
+    const result = await retention.purgeExpiredData();
+    assert.equal(result.rateLimitCounters, 1);
+    const left = (await prisma.rateLimitCounter.findMany({ select: { key: true } })).map((r) => r.key).sort();
+    assert.deepEqual(left, ["t:active", "t:just-expired"]);
+    await prisma.rateLimitCounter.deleteMany();
+  });
+
   it("is a no-op on a clean database", async () => {
     assert.deepEqual(await retention.purgeExpiredData(), {
+      rateLimitCounters: 0,
       emailOtps: 0,
       stalePositions: 0,
       deliveryRecords: 0,

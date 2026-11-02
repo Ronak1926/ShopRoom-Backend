@@ -32,6 +32,7 @@ export async function getTemplate(req: Request, res: Response): Promise<void> {
   try {
     const id = requireIdParam(req.params.id);
     const template = await getTemplateService(id);
+    res.set("Cache-Control", "private, max-age=300");
     res.json({ data: template });
   } catch (err) {
     handleControllerError(res, err, "Failed to fetch template");

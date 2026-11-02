@@ -11,7 +11,7 @@ import type { Message } from "firebase-admin/messaging";
 import { prisma } from "../database/prisma.js";
 import { firebaseMessaging } from "../lib/firebaseAdmin.js";
 import { NotificationError } from "../utils/notificationError.js";
-import { chunk, mapWithConcurrency } from "../utils/concurrency.js";
+import { chunk, mapWithConcurrency, retryOnConflict } from "../utils/concurrency.js";
 import { isAllowedImageUrl } from "../utils/safeUrl.js";
 import type { CompositionNode } from "../schemas/notification.schema.js";
 import { validateDesign } from "./notificationValidation.service.js";
@@ -132,7 +132,7 @@ async function persistOutcomes(outcomes: DeviceOutcome[]): Promise<void> {
     failedByCode.set(code, [...(failedByCode.get(code) ?? []), o.recipientId]);
   }
 
-  const writes: Array<() => Promise<unknown>> = [
+  const statusWrites: Array<() => Promise<unknown>> = [
     ...chunk(succeeded, DB_BATCH_SIZE).map(
       (ids) => () =>
         prisma.notificationSendRecipient.updateMany({
@@ -155,13 +155,16 @@ async function persistOutcomes(outcomes: DeviceOutcome[]): Promise<void> {
   const deadDeviceIds = outcomes
     .filter((o) => !o.ok && o.errorCode && INVALID_TOKEN_CODES.has(o.errorCode))
     .map((o) => o.deviceId);
-  writes.push(
-    ...chunk(deadDeviceIds, DB_BATCH_SIZE).map(
-      (ids) => () => prisma.customerDevice.deleteMany({ where: { id: { in: ids } } }),
-    ),
+  const deviceWrites = chunk(deadDeviceIds, DB_BATCH_SIZE).map(
+    (ids) => () => prisma.customerDevice.deleteMany({ where: { id: { in: ids } } }),
   );
 
-  await mapWithConcurrency(writes, DB_CONCURRENCY, (write) => write());
+  // Two phases, never interleaved. Deleting a device also rewrites its recipient
+  // rows (the foreign key sets deviceId to NULL), the same rows the status updates
+  // touch; running both at once takes row locks in opposite orders and deadlocks
+  // on large sends. Conflicts that still occur are retried.
+  await mapWithConcurrency(statusWrites, DB_CONCURRENCY, (write) => retryOnConflict(write));
+  await mapWithConcurrency(deviceWrites, DB_CONCURRENCY, (write) => retryOnConflict(write));
   if (deadDeviceIds.length > 0) fcmTokensInvalidated.inc({}, deadDeviceIds.length);
 }
 

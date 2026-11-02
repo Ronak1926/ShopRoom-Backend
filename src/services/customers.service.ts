@@ -168,11 +168,15 @@ export type JoinedRoom = {
   joinedAt: string;
 };
 
+/** No customer is expected to follow more shops than this; the cap keeps the response bounded. */
+const MAX_JOINED_ROOMS = 200;
+
 /** Rooms the given customer has joined, most recently joined first. */
 export async function getJoinedRooms(customerId: string): Promise<JoinedRoom[]> {
   const memberships = await prisma.membership.findMany({
     where: { customerId },
     orderBy: { joinedAt: "desc" },
+    take: MAX_JOINED_ROOMS,
     select: {
       joinedAt: true,
       room: {

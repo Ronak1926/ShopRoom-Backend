@@ -29,6 +29,7 @@ import {
   loginIpLimiter,
   paymentLimiter,
   phoneOtpSendIpLimiter,
+  sharedStore,
 } from "../middleware/rateLimiters.js";
 
 // -- Rate limiters -------------------------------------------------------------
@@ -46,6 +47,7 @@ const otpSendLimiter = rateLimit({
   message: { message: "Too many OTP requests. Please wait 10 minutes and try again." },
   standardHeaders: true,
   legacyHeaders: false,
+  store: sharedStore("phone-otp-send-number"),
 });
 
 /** 10 OTP verify attempts per draft per 10 minutes (Twilio rejects after 5 wrong). */
@@ -59,6 +61,7 @@ const otpVerifyLimiter = rateLimit({
   message: { message: "Too many verification attempts. Please wait 10 minutes." },
   standardHeaders: true,
   legacyHeaders: false,
+  store: sharedStore("phone-otp-verify-draft"),
 });
 
 // -- Routes --------------------------------------------------------------------

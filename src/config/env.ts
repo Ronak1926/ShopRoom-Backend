@@ -70,3 +70,32 @@ export function trustProxySetting(env: Env = process.env): number | false {
   const hops = Number(env.TRUST_PROXY_HOPS ?? 0);
   return Number.isInteger(hops) && hops > 0 && hops <= 5 ? hops : false;
 }
+
+export interface DbPoolConfig {
+  max: number;
+  connectionTimeoutMillis: number;
+  idleTimeoutMillis: number;
+  statement_timeout: number;
+}
+
+function boundedInt(raw: string | undefined, fallback: number, min: number, max: number): number {
+  const value = Number(raw);
+  return Number.isInteger(value) && value >= min && value <= max ? value : fallback;
+}
+
+/**
+ * Connection-pool limits for the Postgres driver. The library default waits
+ * forever for a free connection, which turns pool exhaustion into hung requests;
+ * an explicit acquire timeout makes it a fast, visible 500 instead.
+ *
+ * Size it so that (API instances x DB_POOL_MAX) stays under ~80% of Postgres's
+ * max_connections; see docs/ops/PERFORMANCE.md. Out-of-range values fall back to defaults.
+ */
+export function dbPoolConfig(env: Env = process.env): DbPoolConfig {
+  return {
+    max: boundedInt(env.DB_POOL_MAX, 10, 1, 200),
+    connectionTimeoutMillis: boundedInt(env.DB_POOL_ACQUIRE_TIMEOUT_MS, 5_000, 100, 60_000),
+    idleTimeoutMillis: boundedInt(env.DB_POOL_IDLE_TIMEOUT_MS, 30_000, 1_000, 600_000),
+    statement_timeout: boundedInt(env.DB_STATEMENT_TIMEOUT_MS, 30_000, 1_000, 600_000),
+  };
+}

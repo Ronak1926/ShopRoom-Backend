@@ -34,6 +34,16 @@ model Customer {
   @@index([latitude, longitude])
 }
 
+/// Hit counter for rate limits that must hold across several API instances (login, OTP,
+/// sign-up, payments). One row per limiter and client key; a row is reset when its window ends.
+model RateLimitCounter {
+  key     String   @id
+  hits    Int
+  resetAt DateTime @db.Timestamptz(3)
+
+  @@index([resetAt])
+}
+
 model EmailOtp {
   id        String   @id @default(cuid())
   email     String
@@ -134,6 +144,7 @@ model Shop {
 
   @@index([category])
   @@index([ownerId])
+  @@index([latitude, longitude])
 }
 
 /// The community room auto-created for every shop at registration.
@@ -157,6 +168,7 @@ model Room {
   updatedAt DateTime @updatedAt
 
   @@index([inviteCode])
+  @@index([membersCount])
 }
 
 /// A customer's membership in a shop's room.
@@ -171,7 +183,7 @@ model Membership {
   notificationsEnabled Boolean  @default(true)
 
   @@unique([roomId, customerId])
-  @@index([roomId])
+  @@index([roomId, joinedAt(sort: Desc)])
   @@index([customerId])
 }
 
@@ -208,6 +220,11 @@ model Message {
   hiddenFor MessageHiddenFor[]
 
   @@index([roomId, createdAt])
+  // Foreign keys that cascade or null out on delete. Without them, deleting a message
+  // scans the table once per reply lookup, and deleting an account scans it for their messages.
+  @@index([replyToId])
+  @@index([customerId])
+  @@index([shopkeeperId])
 }
 
 /// One reaction per participant per message — keyed by viewerKey
@@ -343,7 +360,7 @@ model NotificationDesign {
   versions NotificationDesignVersion[]
 
   @@index([shopkeeperId])
-  @@index([shopkeeperId, isArchived])
+  @@index([shopkeeperId, isArchived, updatedAt(sort: Desc)])
   @@index([categoryId])
 }
 
@@ -397,7 +414,7 @@ model NotificationAsset {
   sizeBytes          Int?
   createdAt          DateTime   @default(now())
 
-  @@index([shopkeeperId])
+  @@index([shopkeeperId, createdAt(sort: Desc)])
 }
 
 // ─── Push Notification Delivery ─────────────────────────────────────────────────
@@ -428,6 +445,7 @@ model CustomerDevice {
   recipients NotificationSendRecipient[]
 
   @@index([customerId])
+  @@index([lastSeenAt])
 }
 
 enum NotificationSendStatus {
@@ -515,6 +533,9 @@ model NotificationSendRecipient {
   @@unique([sendId, deviceId])
   @@index([sendId])
   @@index([customerId])
+  // Deleting a device nulls its recipient rows through this foreign key; without an index each delete scans the table.
+  @@index([deviceId])
+  @@index([createdAt])
 }
 
 // ─── Scheduled Sends ────────────────────────────────────────────────────────────

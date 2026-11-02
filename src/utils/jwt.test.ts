@@ -76,6 +76,26 @@ describe("JWT helpers", () => {
     );
   });
 
+  it("issues tokens with the documented lifetimes", () => {
+    const lifetime = (token: string) => {
+      const { iat, exp } = jwt.decode(token) as { iat: number; exp: number };
+      return exp - iat;
+    };
+    assert.equal(lifetime(signCustomerToken("c1", 0)), 7 * 24 * 3600);
+    assert.equal(lifetime(signShopkeeperToken("s1", 0)), 7 * 24 * 3600);
+    assert.equal(lifetime(signPhoneVerifiedToken("d1", "9876543210")), 15 * 60);
+  });
+
+  it("rejects an expired token of every type", () => {
+    const sign = (claims: object, audience: string) =>
+      jwt.sign(claims, SECRET, { algorithm: "HS256", issuer: "shoproom", audience, expiresIn: -10 });
+    assert.throws(() => verifyShopkeeperToken(sign({ sub: "s1", type: "shopkeeper", tv: 0 }, "shopkeeper")), /expired/);
+    assert.throws(
+      () => verifyPhoneVerifiedToken(sign({ type: "phone_verified", draftId: "d", phoneNumber: "9" }, "phone_verified")),
+      /expired/,
+    );
+  });
+
   it("rejects an expired token", () => {
     const expired = jwt.sign({ sub: "c1", type: "customer", tv: 0 }, SECRET, {
       algorithm: "HS256",

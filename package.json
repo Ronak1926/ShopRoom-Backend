@@ -12,7 +12,8 @@
     "seed": "tsx prisma/seed.ts",
     "seed:notifications": "tsx prisma/seedNotificationsOnly.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx --test --test-concurrency=1 \"src/**/*.test.ts\""
+    "test": "tsx --test --test-concurrency=1 \"src/**/*.test.ts\"",
+    "test:db:setup": "node scripts/setupTestDb.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

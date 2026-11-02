@@ -147,6 +147,24 @@ describe("sendNotification", { skip: !enabled }, () => {
     assert.equal(deadRow.deviceId, null, "device link cleared when the device is removed");
   });
 
+  it("splits a large audience into FCM batches of at most 500 and reaches every device once", async () => {
+    await resetDatabase(prisma);
+    const { shopkeeperId, roomId } = await createShop(prisma);
+    const designId = await createDesign(prisma, shopkeeperId);
+    const crowd = await createCustomer(prisma, { member: { roomId }, devices: 1_100 });
+
+    const result = await sendNotification(shopkeeperId, toMembers(designId));
+
+    assert.equal(result.recipients, 1_100);
+    assert.deepEqual(stub.batches.map((b) => b.length).sort((a, b) => b - a), [500, 500, 100]);
+    const tokens = stub.messages().map((m) => (m as { token: string }).token);
+    assert.equal(new Set(tokens).size, 1_100, "no device is sent to twice");
+    assert.deepEqual([...new Set(tokens)].sort(), [...crowd.tokens].sort());
+    const send = await prisma.notificationSend.findUniqueOrThrow({ where: { id: result.id } });
+    assert.equal(send.successCount, 1_100);
+    assert.equal(await prisma.notificationSendRecipient.count({ where: { sendId: result.id } }), 1_100);
+  });
+
   it("records a FAILED send instead of crashing when FCM itself throws", async () => {
     const { shopkeeperId, roomId } = await createShop(prisma);
     const designId = await createDesign(prisma, shopkeeperId);

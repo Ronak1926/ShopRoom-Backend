@@ -40,7 +40,7 @@ export interface AnalyticsView {
   /** Percentage change against the previous period of the same length. */
   deltas: Counts;
   series: DayPoint[];
-  topDesigns: { name: string; sends: number; opened: number; delivered: number; openRate: number }[];
+  topDesigns: { designId: string; name: string; sends: number; opened: number; delivered: number; openRate: number; clickRate: number }[];
   insights: { membersTotal: number; activeMembers: number; returningMembers: number; engagementScore: number };
 }
 
@@ -90,9 +90,10 @@ export async function getAnalytics(shopkeeperId: string, days: number, now = new
       WHERE "shopkeeperId" = ${shopkeeperId} AND "status" <> 'PENDING'
         AND ("createdAt" AT TIME ZONE 'UTC') >= to_timestamp(${sinceEpoch})
       GROUP BY 1`),
-    prisma.$queryRaw<{ name: string; sends: number; delivered: number; opened: number }[]>(Prisma.sql`
-      SELECT d."name" AS "name", COUNT(*)::int AS "sends",
-             COALESCE(SUM(s."deliveredCount"), 0)::int AS "delivered", COALESCE(SUM(s."openedCount"), 0)::int AS "opened"
+    prisma.$queryRaw<{ designId: string; name: string; sends: number; delivered: number; opened: number; clicked: number }[]>(Prisma.sql`
+      SELECT d."id" AS "designId", d."name" AS "name", COUNT(*)::int AS "sends",
+             COALESCE(SUM(s."deliveredCount"), 0)::int AS "delivered", COALESCE(SUM(s."openedCount"), 0)::int AS "opened",
+             COALESCE(SUM(s."clickedCount"), 0)::int AS "clicked"
       FROM "NotificationSend" s
       JOIN "NotificationDesignVersion" v ON v."id" = s."designVersionId"
       JOIN "NotificationDesign" d ON d."id" = v."designId"
@@ -146,7 +147,15 @@ export async function getAnalytics(shopkeeperId: string, days: number, now = new
       clicked: change(totals.clicked, before.clicked),
     },
     series: current,
-    topDesigns: topRows.map((r) => ({ name: r.name, sends: r.sends, opened: r.opened, delivered: r.delivered, openRate: pct(r.opened, r.delivered) })),
+    topDesigns: topRows.map((r) => ({
+      designId: r.designId,
+      name: r.name,
+      sends: r.sends,
+      opened: r.opened,
+      delivered: r.delivered,
+      openRate: pct(r.opened, r.delivered),
+      clickRate: pct(r.clicked, r.delivered),
+    })),
     insights: {
       membersTotal,
       activeMembers,

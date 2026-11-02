@@ -6,6 +6,7 @@
 
 import { prisma } from "../database/prisma.js";
 import type { Prisma } from "../generated/client.js";
+import { escapeLike } from "../utils/like.js";
 
 export interface SendHistoryItem {
   id: string;
@@ -40,9 +41,6 @@ export interface HistoryQuery {
   /** Only sends from the last N days. */
   days?: number;
 }
-
-/** Prisma hands `contains` to LIKE as-is, so `%`, `_` and `\` in a search must be escaped to match literally. */
-const escapeLike = (text: string): string => text.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 function whereFor(shopkeeperId: string, query: HistoryQuery): Prisma.NotificationSendWhereInput {
   const where: Prisma.NotificationSendWhereInput = { shopkeeperId };

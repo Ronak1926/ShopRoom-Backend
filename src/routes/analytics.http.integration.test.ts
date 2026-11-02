@@ -136,7 +136,8 @@ describe("analytics and send history", { skip: !enabled }, () => {
       });
 
       const a = (await t.call("GET", "/api/notifications/analytics?days=7", { token: s.token })).json.data;
-      assert.deepEqual(a.topDesigns.map((d: { name: string; openRate: number }) => [d.name, d.openRate]), [["Flash sale", 80], ["Test banner", 10]]);
+      assert.deepEqual(a.topDesigns.map((d: { name: string; openRate: number; clickRate: number }) => [d.name, d.openRate, d.clickRate]), [["Flash sale", 80, 20], ["Test banner", 10, 1]]);
+      assert.equal(a.topDesigns[0].designId, other.id);
       assert.deepEqual(a.insights, { membersTotal: 4, activeMembers: 2, returningMembers: 1, engagementScore: 50 });
     });
 

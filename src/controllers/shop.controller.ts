@@ -15,6 +15,7 @@ import {
 } from "../services/room.service.js";
 import { getIO, removeViewerFromRoom } from "../realtime/socket.js";
 import { imageDataUriSchema } from "../schemas/imageUpload.schema.js";
+import { listShopMembers } from "../services/shopMembers.service.js";
 import { buildInviteLink } from "../utils/inviteCode.js";
 import { uploadImageToCloudinary } from "../lib/cloudinary.js";
 import { parseBody } from "../utils/validate.js";
@@ -112,72 +113,29 @@ export async function getShopDashboard(
 // Query params: page (0-based, default 0), limit (default 10, max 100)
 // Auth: requireShopkeeperAuth
 
+const membersQuerySchema = z.object({
+  page: z.coerce.number().int().min(0).max(100_000).default(0),
+  limit: z.coerce.number().int().min(1).max(100).default(10),
+  q: z.string().trim().max(100).optional(),
+  notifications: z.enum(["on", "off"]).optional(),
+});
+
 export async function getShopMembers(
   req: Request,
   res: Response,
 ): Promise<void> {
-  const shopkeeperId = req.shopkeeperId!;
-
-  const page = Math.max(
-    0,
-    parseInt((req.query.page as string) ?? "0", 10) || 0,
-  );
-  const limit = Math.min(
-    100,
-    Math.max(1, parseInt((req.query.limit as string) ?? "10", 10) || 10),
-  );
-
-  const shop = await prisma.shop.findUnique({
-    where: { ownerId: shopkeeperId },
-    select: {
-      room: {
-        select: {
-          id: true,
-          membersCount: true,
-        },
-      },
-    },
-  });
-
-  if (!shop?.room) {
-    res.json({ members: [], total: 0, page, limit, totalPages: 0 });
+  const parsed = membersQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid input" });
     return;
   }
-
-  const [memberships, total] = await Promise.all([
-    prisma.membership.findMany({
-      where: { roomId: shop.room.id },
-      orderBy: { joinedAt: "desc" },
-      skip: page * limit,
-      take: limit,
-      select: {
-        id: true,
-        joinedAt: true,
-        notificationsEnabled: true,
-        customer: {
-          select: { id: true, fullName: true, email: true },
-        },
-      },
-    }),
-    prisma.membership.count({ where: { roomId: shop.room.id } }),
-  ]);
-
-  const members = memberships.map((m) => ({
-    id: m.id,
-    customerId: m.customer.id,
-    customerName: m.customer.fullName,
-    email: m.customer.email,
-    joinedAt: m.joinedAt.toISOString(),
-    notificationsEnabled: m.notificationsEnabled,
-  }));
-
-  res.json({
-    members,
-    total,
-    page,
-    limit,
-    totalPages: Math.ceil(total / limit),
-  });
+  try {
+    res.set("Cache-Control", "private, no-cache");
+    res.json(await listShopMembers(req.shopkeeperId!, { ...parsed.data, q: parsed.data.q || undefined }));
+  } catch (err) {
+    logger.error("List members", err);
+    res.status(500).json({ message: "Failed to load members" });
+  }
 }
 
 // ─── GET /api/shop/me ─────────────────────────────────────────────────────────

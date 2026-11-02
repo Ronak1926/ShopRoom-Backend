@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "tsx --test --test-concurrency=1 \"src/**/*.test.ts\"",
     "test:db:setup": "node scripts/setupTestDb.mjs",
-    "db:verify-backup": "node scripts/verifyBackup.mjs"
+    "db:verify-backup": "node scripts/verifyBackup.mjs",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

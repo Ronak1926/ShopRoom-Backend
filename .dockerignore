@@ -1,0 +1,13 @@
+node_modules
+dist
+.git
+.github
+.env
+.env.*
+!.env.test.example
+docs
+scripts
+coverage
+*.log
+src/generated
+**/*.test.ts

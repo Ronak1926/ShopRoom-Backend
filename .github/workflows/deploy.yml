@@ -1,0 +1,92 @@
+name: deploy
+
+# development merge  -> image built, then staging deployed automatically
+# manual dispatch    -> promote ANY built image to staging or production
+#                       (production waits for the reviewers configured on the
+#                       "production" GitHub environment)
+# rollback           -> dispatch again with an earlier image tag
+#
+# Deployment itself is a call to the hosting platform's deploy hook, stored as
+# the DEPLOY_HOOK_URL secret of each GitHub environment. See docs/ops/DEPLOYMENT.md.
+
+on:
+  push:
+    branches: [development]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Where to deploy
+        type: choice
+        options: [staging, production]
+        required: true
+      tag:
+        description: Image tag (a git commit SHA) to deploy. To roll back, pick an earlier one.
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy-${{ github.event.inputs.environment || 'staging' }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.meta.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/shoproom-backend" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.name }}:${{ github.sha }}
+
+  staging:
+    needs: image
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Trigger staging deploy
+        env:
+          DEPLOY_HOOK_URL: ${{ secrets.DEPLOY_HOOK_URL }}
+          IMAGE: ${{ needs.image.outputs.name }}:${{ github.sha }}
+        run: |
+          if [ -z "$DEPLOY_HOOK_URL" ]; then
+            echo "::warning::DEPLOY_HOOK_URL is not set for the staging environment; image $IMAGE was built but not deployed."
+            exit 0
+          fi
+          curl -fsS --max-time 30 -X POST "$DEPLOY_HOOK_URL" -H 'Content-Type: application/json' -d "{\"image\":\"$IMAGE\"}"
+
+  promote:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Trigger deploy
+        env:
+          DEPLOY_HOOK_URL: ${{ secrets.DEPLOY_HOOK_URL }}
+          TAG: ${{ github.event.inputs.tag }}
+          TARGET: ${{ github.event.inputs.environment }}
+        run: |
+          if [ -z "$DEPLOY_HOOK_URL" ]; then
+            echo "::error::DEPLOY_HOOK_URL is not set for the $TARGET environment."
+            exit 1
+          fi
+          if ! printf '%s' "$TAG" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::tag must be a full 40-character git commit SHA."
+            exit 1
+          fi
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/shoproom-backend:$TAG"
+          curl -fsS --max-time 30 -X POST "$DEPLOY_HOOK_URL" -H 'Content-Type: application/json' -d "{\"image\":\"$IMAGE\"}"

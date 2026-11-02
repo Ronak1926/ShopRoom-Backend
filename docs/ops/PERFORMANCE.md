@@ -72,6 +72,10 @@ First-load JavaScript, uncompressed, before to after moving the notification ren
 
 Framer Motion and the animation preset catalog are now only on the studio, notification pages, dashboard and the marketing page. The studio is the largest route (1,251 KB) and includes a 395 KB chunk with the image cropper; lazy-loading the crop dialog is the next saving. The script fails the build when a route passes its budget (set in the script).
 
+### Response compression (`src/middleware/compress.ts`)
+
+JSON replies of 1 KB or more are gzipped for clients that accept it, using `node:zlib` (no dependency). A page of 24 notification templates went from 141,863 to 9,925 bytes on the wire (14x smaller), and the whole 95-template catalogue is 519 KB raw and 29 KB gzipped. Replies always carry `Vary: Accept-Encoding`; empty, HEAD, already-encoded and `no-transform` replies are left alone, and `compress.test.ts` covers each case. If a reverse proxy in front of the API already compresses, it skips replies that carry a `Content-Encoding`, so the two do not double up.
+
 ## Connection pool
 
 `DB_POOL_MAX` (default 10), `DB_POOL_ACQUIRE_TIMEOUT_MS` (5000; the library default waits forever), `DB_POOL_IDLE_TIMEOUT_MS` (30000), `DB_STATEMENT_TIMEOUT_MS` (30000). Tests show the third caller of a two-connection pool failing in 300 ms instead of hanging, and a runaway query being cancelled at the statement timeout.

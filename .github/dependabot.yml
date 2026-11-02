@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Security fixes arrive as their own pull requests regardless of this schedule;
+  # the weekly runs below keep everything else from drifting far behind.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

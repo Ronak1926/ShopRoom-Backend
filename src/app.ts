@@ -9,6 +9,7 @@ import { opsRouter } from "./routes/ops.js";
 import { clientErrorsRouter } from "./routes/clientErrors.js";
 import { publicRouter } from "./routes/public.js";
 import { securityHeaders } from "./middleware/securityHeaders.js";
+import { compressJson } from "./middleware/compress.js";
 import { customersRouter } from "./routes/customers.js";
 import { otpRouter } from "./routes/otp.js";
 import { shopkeeperRouter } from "./routes/shopkeeper.js";
@@ -24,6 +25,7 @@ app.disable("x-powered-by");
 app.set("trust proxy", trustProxySetting());
 
 app.use(securityHeaders);
+app.use(compressJson);
 app.use(requestLogger);
 
 // Monitoring endpoints sit before CORS and the global limiter so uptime checks

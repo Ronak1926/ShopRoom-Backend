@@ -3,3 +3,7 @@ onlyBuiltDependencies:
   - '@prisma/engines'
   - esbuild
   - prisma
+
+overrides:
+  # firebase-admin > firestore > google-gax pulls uuid 9 (GHSA-w5hq-g745-h8pq). uuid 11 keeps the CommonJS entry point it needs.
+  uuid@<11.1.1: ">=11.1.1 <12"

@@ -1,0 +1,26 @@
+# OWASP Top 10 (2021) review
+
+Reviewed 2026-10-30 against the backend at the SCRUM-7 commit and the front end's headers/auth handling. "Evidence" names the test or file that proves the control; a status of **Partial** lists what remains. This is an engineering self-assessment, not an independent audit: the sign-off box at the bottom is for a named human reviewer and an external penetration test (see `PENTEST_SCOPE.md`).
+
+| # | Category | Status | Controls and evidence | Remaining |
+| --- | --- | --- | --- | --- |
+| A01 | Broken access control | **Mostly met** | Every non-public route requires a session, and the allow-list of public routes is enforced by a test that walks the whole router (`security.http.integration.test.ts`, "authorization coverage"). Queries are scoped to the authenticated shopkeeper/customer; cross-tenant read/write attempts return 403/404 (tenant isolation tests). Chat edit/delete/react are bound to the room they are called through (`accountSecurity.integration.test.ts`). Sockets re-check membership per event; typing requires a joined room. | Authorization is enforced per handler, not by a policy layer; new routes rely on review plus the coverage test. |
+| A02 | Cryptographic failures | **Met** (deploy-dependent) | bcrypt cost 12 with rehash-on-login; JWT HS256 pinned, issuer/audience claims, rotation via `JWT_SECRET_PREVIOUS`; email OTP stored as an HMAC and compared in constant time; chat encrypted AES-256-GCM at rest; HSTS in production. | TLS termination, database TLS and disk encryption are deployment responsibilities. The message key derives from a configured secret (see `SECRET_ROTATION.md`). |
+| A03 | Injection | **Met** | Prisma parameterises queries; the single raw SQL (audience resolution) uses `Prisma.sql` parameters only. Zod validates bodies at the controller boundary; draft data is a whitelist; design JSON is schema-bound with URL allow-lists (`safeUrl.test.ts`, `notificationValidation.urls.test.ts`). The front end renders design text as React text, not HTML. | Free-text fields are validated for length, not content; output encoding relies on React. |
+| A04 | Insecure design | **Partial** | Payment is bound to the order created for the draft and plan; one payment buys one account (unique indexes); signature, webhook and phone checks fail closed in production; daily send limits are enforced under an advisory lock; OTP attempt caps, resend cooldown and request-size limits exist. | No formal threat-model document. Refunds and chargebacks are not handled. |
+| A05 | Security misconfiguration | **Mostly met** | Security headers on API and front end (Chrome smoke test: 0 CSP violations on 16 pages); `x-powered-by` removed; JSON 404/500 without internals; production boot refuses missing or weak secrets (`env.test.ts`); CORS is an explicit allow-list. | CSP still allows inline scripts (Next.js bootstrap); a nonce-based CSP would force dynamic rendering. Deployment hardening (non-root runtime, least-privilege DB role) is outside this repo. |
+| A06 | Vulnerable and outdated components | **Met at this commit** | `pnpm audit --prod`: backend 1 moderate (transitive `uuid` in google-gax, not reachable through firebase-admin's usage), frontend 0. CI audits every push and weekly (`.github/workflows/security.yml`). | Dev-dependency advisories remain (build tooling only). Dependabot or Renovate is not enabled; it needs repository admin access. |
+| A07 | Identification and authentication failures | **Mostly met** | Per-IP and per-account login throttling; constant-time login for unknown emails; sessions are revocable and die with the account; Google sign-in requires a Google-verified email and takes over unverified squatted accounts; OTP brute-force cap. | No MFA. Passwords are checked for length only (no breached-password check). Session tokens are in non-HttpOnly cookies, so an XSS bug could steal them; HttpOnly cookies need an auth-flow change on the front end. |
+| A08 | Software and data integrity failures | **Partial** | Immutable pinned design versions for sends; Razorpay webhook verified by HMAC; lockfiles committed; tests run in CI. | No signed builds; the Leaflet stylesheet loaded from unpkg has no subresource-integrity hash. |
+| A09 | Security logging and monitoring failures | **Partial** | Server logs failures without PII (phones masked, OTPs and customer ids removed); webhook signature failures are logged. | No audit log of security events (logins, deletions, revocations), no alerting, no structured logging. Tracked under SCRUM-9. |
+| A10 | Server-side request forgery | **Met** | The server fetches only fixed provider hosts (Pexels, Unsplash, Cloudinary, Razorpay, Twilio, Firebase); user-supplied URLs are never fetched server-side. Design image and link URLs are also validated against public hosts and an allow-list. | None. |
+
+## Sign-off
+
+Engineering self-assessment completed by: Claude (automated review), 2026-10-30.
+
+Reviewer: ______________________  Date: __________  Decision: ☐ Approved ☐ Approved with accepted risks ☐ Rejected
+
+External penetration test report attached: ☐ Yes ☐ No (required before launch)
+
+Accepted risks (reviewer to initial): ☐ A05 inline scripts  ☐ A07 no MFA  ☐ A07 non-HttpOnly cookies  ☐ A09 no audit log

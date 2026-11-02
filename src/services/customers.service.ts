@@ -144,6 +144,7 @@ export async function getCustomerById(id: string) {
   const cusomer = await prisma.customer.findUnique({
     where: { id },
     select: {
+      passwordHash: true,
       id: true,
       fullName: true,
       email: true,
@@ -154,7 +155,8 @@ export async function getCustomerById(id: string) {
       updatedAt: true,
     },
   });
-  return cusomer ? toSafeCustomer(cusomer) : null;
+  // Lets the account page offer the right way to confirm a deletion (password or Google).
+  return cusomer ? { ...toSafeCustomer(cusomer), hasPassword: cusomer.passwordHash !== null } : null;
 }
 
 export type JoinedRoom = {

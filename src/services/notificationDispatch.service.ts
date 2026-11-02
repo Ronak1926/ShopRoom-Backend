@@ -16,6 +16,9 @@ import { isAllowedImageUrl } from "../utils/safeUrl.js";
 import type { CompositionNode } from "../schemas/notification.schema.js";
 import { validateDesign } from "./notificationValidation.service.js";
 import { resolveAudienceDevices, usesRadius } from "./notificationAudience.service.js";
+import { logger } from "../lib/logger.js";
+import { fcmTokensInvalidated, notificationDevices, notificationSends } from "../lib/metrics.js";
+import { recordSendResult } from "./alerting.service.js";
 
 const FCM_BATCH_SIZE = 500;
 const FCM_CONCURRENCY = 4;
@@ -110,7 +113,7 @@ async function sendBatch(
       errorCode: r.success ? undefined : (r.error?.code ?? "messaging/unknown-error"),
     }));
   } catch (err) {
-    console.error("FCM batch failed:", (err as { message?: string })?.message);
+    logger.error("FCM batch failed", err);
     return batch.map((r) => ({
       recipientId: r.id,
       deviceId: r.deviceId,
@@ -159,6 +162,7 @@ async function persistOutcomes(outcomes: DeviceOutcome[]): Promise<void> {
   );
 
   await mapWithConcurrency(writes, DB_CONCURRENCY, (write) => write());
+  if (deadDeviceIds.length > 0) fcmTokensInvalidated.inc({}, deadDeviceIds.length);
 }
 
 async function finishSend(
@@ -175,6 +179,7 @@ async function finishSend(
     where: { id: sendId },
     data: { ...data, ...(data.status === "SENT" ? { sentAt: new Date() } : {}) },
   });
+  notificationSends.inc({ status: data.status });
 }
 
 export async function dispatchSend(
@@ -270,6 +275,9 @@ export async function dispatchSend(
 
   const successCount = outcomes.filter((o) => o.ok).length;
   const failureCount = outcomes.length - successCount;
+  notificationDevices.inc({ result: "success" }, successCount);
+  notificationDevices.inc({ result: "failure" }, failureCount);
+  recordSendResult(successCount, failureCount);
   await finishSend(sendId, {
     status: successCount > 0 ? "SENT" : "FAILED",
     failureReason: successCount > 0 ? undefined : "ALL_DELIVERIES_FAILED",

@@ -5,6 +5,7 @@
  */
 
 import { prisma } from "../database/prisma.js";
+import { logger } from "../lib/logger.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RUN_INTERVAL_MS = DAY_MS;
@@ -60,9 +61,9 @@ async function runOnce(): Promise<void> {
   try {
     const result = await purgeExpiredData();
     const total = Object.values(result).reduce((sum, n) => sum + n, 0);
-    if (total > 0) console.log("[retention] purged", JSON.stringify(result));
+    if (total > 0) logger.info("Retention purge", { ...result });
   } catch (err) {
-    console.error("Retention purge failed:", (err as Error)?.message);
+    logger.error("Retention purge failed", err);
   }
 }
 

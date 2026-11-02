@@ -1,5 +1,6 @@
 import { PrismaClient } from "../generated/client.js";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { logger } from "../lib/logger.js";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -28,5 +29,5 @@ export async function connectDatabase() {
 
   await prisma.$connect();
   global.__dbConnected = true;
-  console.log("Database connected successfully");
+  logger.info("Database connected");
 }

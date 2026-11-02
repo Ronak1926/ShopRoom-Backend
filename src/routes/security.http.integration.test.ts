@@ -35,6 +35,10 @@ const PUBLIC_ROUTES = new Set([
   "GET /api/shop/invite/:code",
   // authenticated by a per-device secret token
   "POST /api/notifications/receipts",
+  // monitors and error intake: no user data, bounded and rate limited
+  "GET /healthz",
+  "GET /readyz",
+  "POST /api/client-errors/",
 ]);
 
 function listRoutes(prefix: string, router: Router): { method: string; path: string }[] {

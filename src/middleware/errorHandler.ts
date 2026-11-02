@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { logger } from "../lib/logger.js";
 
 interface HttpError extends Error {
   status?: number;
@@ -36,6 +37,6 @@ export function errorHandler(
     return;
   }
 
-  console.error("Unhandled error:", err.message);
+  logger.error("Unhandled error", err);
   res.status(500).json({ message: "Something went wrong. Please try again." });
 }

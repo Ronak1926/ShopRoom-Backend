@@ -1,3 +1,5 @@
+import { logger } from "../lib/logger.js";
+
 /**
  * utils/inviteCode.ts — Unique invite code generation with collision prevention.
  *
@@ -48,7 +50,7 @@ export async function generateUniqueInviteCode(tx: TxClient): Promise<string> {
     const code = randomCode();
     const existing = await tx.room.findUnique({ where: { inviteCode: code } });
     if (!existing) return code;
-    console.warn(`[inviteCode] collision on attempt ${attempt}: ${code}`);
+    logger.warn("Invite code collision", { attempt });
   }
 
   throw new Error(

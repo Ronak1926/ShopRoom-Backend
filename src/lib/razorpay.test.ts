@@ -12,14 +12,14 @@ const KEY_SECRET = "test-key-secret";
 const WEBHOOK_SECRET = "test-webhook-secret";
 const hmac = (secret: string, payload: string) => createHmac("sha256", secret).update(payload).digest("hex");
 
-const ENV_KEYS = ["NODE_ENV", "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET"] as const;
+const ENV_KEYS = ["LOG_LEVEL", "NODE_ENV", "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET"] as const;
 let saved: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>>;
 
 beforeEach(() => {
   saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
   for (const k of ENV_KEYS) delete process.env[k];
-  // Swallow the expected "credentials not configured" warnings.
-  console.warn = () => undefined;
+  // The "credentials not configured" warnings are expected here.
+  process.env.LOG_LEVEL = "silent";
 });
 afterEach(() => {
   for (const k of ENV_KEYS) {

@@ -6,6 +6,7 @@ import { prisma } from "../database/prisma.js";
 import { deleteImages, publicIdFromUrl } from "../lib/cloudinary.js";
 import { closeRoom } from "../realtime/socket.js";
 import { forgetSession } from "./session.service.js";
+import { logger } from "../lib/logger.js";
 
 /**
  * Permanently deletes the shopkeeper together with their shop, room (members'
@@ -45,6 +46,6 @@ export async function deleteShopkeeperAccount(shopkeeperId: string): Promise<voi
       .filter((id): id is string => id !== null),
   ];
   await deleteImages(publicIds).catch((err) => {
-    console.error("Image cleanup after account deletion failed:", (err as Error)?.message);
+    logger.error("Image cleanup after account deletion failed", err);
   });
 }

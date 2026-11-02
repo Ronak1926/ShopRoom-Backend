@@ -12,6 +12,8 @@ import { assertShopHasLocation, loadSenderContext } from "./notificationSender.s
 import { assertUnderDailyLimit, reserveSend } from "./notificationUsage.service.js";
 import { dispatchSend } from "./notificationDispatch.service.js";
 import { usesRadius } from "./notificationAudience.service.js";
+import { logger } from "../lib/logger.js";
+import { notificationSends } from "../lib/metrics.js";
 
 export interface SendNotificationResult {
   id: string;
@@ -47,7 +49,8 @@ export async function sendNotification(
     const result = await dispatchSend(send.id);
     return { id: send.id, recipients: result.recipients };
   } catch (err) {
-    console.error("Dispatch failed:", (err as { message?: string })?.message);
+    logger.error("Dispatch failed", err);
+    notificationSends.inc({ status: "FAILED" });
     await prisma.notificationSend.update({
       where: { id: send.id },
       data: { status: "FAILED", failureReason: "DISPATCH_ERROR" },

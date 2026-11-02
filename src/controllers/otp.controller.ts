@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { OtpCooldownError, sendEmailOtp, verifyEmailOtp } from "../services/otp.service.js";
+import { logger } from "../lib/logger.js";
 
 const sendSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(254),
@@ -25,7 +26,7 @@ export async function sendOtp(req: Request, res: Response): Promise<void> {
       res.status(429).json({ message: err.message });
       return;
     }
-    console.error("OTP send error:", (err as Error)?.message);
+    logger.error("OTP send error", err);
     res.status(500).json({ message: "Failed to send OTP. Please try again." });
   }
 }

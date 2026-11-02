@@ -26,6 +26,7 @@
 
 import twilio from "twilio";
 import { isProduction } from "../config/env.js";
+import { logger } from "./logger.js";
 
 // ─── Error class ──────────────────────────────────────────────────────────────
 
@@ -82,11 +83,7 @@ export async function sendVerifyOtp(phoneNumber: string): Promise<void> {
   if (!sid || !authToken || !serviceSid) {
     // Never let a missing credential turn phone verification into a no-op in production.
     if (isProduction()) throw new VerifyError("Phone verification is temporarily unavailable.");
-    console.warn(
-      `\n⚠️  [Twilio Verify] Credentials not configured — OTP NOT sent.\n` +
-        `   Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_VERIFY_SERVICE_SID in .env\n` +
-        `   DEV: the phone number is treated as verified.\n`,
-    );
+    logger.warn("Twilio Verify not configured: OTP not sent, number treated as verified (development only)");
     return;
   }
 
@@ -105,9 +102,7 @@ export async function sendVerifyOtp(phoneNumber: string): Promise<void> {
       );
     }
 
-    console.log(
-      `[Twilio Verify] OTP sent to ${maskPhone(to)} — status: ${verification.status}`,
-    );
+    logger.info("Phone OTP sent", { to: maskPhone(to), status: verification.status });
   } catch (err: unknown) {
     const e = err as { code?: number; message?: string; status?: number };
 
@@ -131,7 +126,7 @@ export async function sendVerifyOtp(phoneNumber: string): Promise<void> {
       );
 
     // Unexpected error — log and rethrow a safe message
-    console.error("[Twilio Verify] Send error:", e.message, "code:", e.code);
+    logger.error("Twilio Verify send failed", err);
     throw new VerifyError("Failed to send OTP. Please try again.");
   }
 }
@@ -160,7 +155,7 @@ export async function checkVerifyOtp(
   if (!sid || !authToken || !serviceSid) {
     if (isProduction()) throw new VerifyError("Phone verification is temporarily unavailable.");
     // Dev fallback: accept any 6-digit code
-    console.warn("[Twilio Verify] Credentials not configured — accepting any code in dev mode.\n");
+    logger.warn("Twilio Verify not configured: accepting any code (development only)");
     return true;
   }
 
@@ -180,7 +175,7 @@ export async function checkVerifyOtp(
     //   "expired"             → 10 minutes passed
     switch (check.status) {
       case "approved":
-        console.log(`[Twilio Verify] Code approved for ${maskPhone(to)}`);
+        logger.info("Phone OTP approved", { to: maskPhone(to) });
         return true;
 
       case "pending":
@@ -212,7 +207,7 @@ export async function checkVerifyOtp(
         "No active OTP found for this number. Please request a new one.",
       );
 
-    console.error("[Twilio Verify] Check error:", e.message, "code:", e.code);
+    logger.error("Twilio Verify check failed", err);
     throw new VerifyError("Verification failed. Please try again.");
   }
 }

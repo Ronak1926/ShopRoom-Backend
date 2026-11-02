@@ -1,4 +1,5 @@
 import { prisma } from "../database/prisma.js";
+import { logger } from "../lib/logger.js";
 import { validatePhoneNumber } from "../lib/phoneValidation.js";
 import { sendVerifyOtp, checkVerifyOtp } from "../lib/twilioVerify.js";
 import { signPhoneVerifiedToken } from "../lib/jwt.js";
@@ -101,7 +102,7 @@ export async function cleanupExpiredDrafts() {
     where: { expiresAt: { lt: new Date() } },
   });
   if (count > 0)
-    console.log(`[draft cleanup] removed ${count} expired draft(s)`);
+    logger.info("Expired drafts removed", { count });
 }
 
 // ─── Phone OTP (Twilio Verify) ────────────────────────────────────────────────

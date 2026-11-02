@@ -13,7 +13,8 @@
     "seed:notifications": "tsx prisma/seedNotificationsOnly.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "tsx --test --test-concurrency=1 \"src/**/*.test.ts\"",
-    "test:db:setup": "node scripts/setupTestDb.mjs"
+    "test:db:setup": "node scripts/setupTestDb.mjs",
+    "db:verify-backup": "node scripts/verifyBackup.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

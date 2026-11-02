@@ -5,6 +5,7 @@ import {
   UnregisterDeviceSchema,
 } from "../schemas/customerDevice.schema.js";
 import { registerDevice, unregisterDevice } from "../services/customerDevice.service.js";
+import { logger } from "../lib/logger.js";
 
 // POST /api/customers/me/devices
 export async function registerDeviceHandler(req: Request, res: Response): Promise<void> {
@@ -20,7 +21,7 @@ export async function registerDeviceHandler(req: Request, res: Response): Promis
     });
     res.status(201).json({ data: device, message: "Device registered" });
   } catch (err) {
-    console.error("Device registration error:", (err as { message?: string })?.message);
+    logger.error("Device registration error", err);
     res.status(500).json({ message: "Failed to register device" });
   }
 }
@@ -36,7 +37,7 @@ export async function unregisterDeviceHandler(req: Request, res: Response): Prom
     await unregisterDevice(req.customerId!, parsed.data.fcmToken);
     res.json({ message: "Device unregistered" });
   } catch (err) {
-    console.error("Device unregistration error:", (err as { message?: string })?.message);
+    logger.error("Device unregistration error", err);
     res.status(500).json({ message: "Failed to unregister device" });
   }
 }

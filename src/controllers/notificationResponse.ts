@@ -7,6 +7,7 @@
 import type { Response } from "express";
 import { NotificationError } from "../utils/notificationError.js";
 import { safeMessage } from "./shopkeeper.controller.js";
+import { logger } from "../lib/logger.js";
 
 export function handleControllerError(
   res: Response,
@@ -17,7 +18,7 @@ export function handleControllerError(
     res.status(err.status).json({ message: err.message });
     return;
   }
-  console.error("Notification error:", (err as { message?: string })?.message);
+  logger.error("Notification error", err);
   res.status(500).json({ message: safeMessage(err, fallback) });
 }
 

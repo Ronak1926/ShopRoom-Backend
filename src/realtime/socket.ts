@@ -17,6 +17,9 @@ import { allowedOrigins } from "../config/env.js";
 import { verifyCustomerToken, verifyShopkeeperToken } from "../utils/jwt.js";
 import { prisma } from "../database/prisma.js";
 import { isSessionActive } from "../services/session.service.js";
+import { socketConnections } from "../lib/metrics.js";
+import { withNewRequestId } from "../lib/requestContext.js";
+import { logger } from "../lib/logger.js";
 import {
   assertRoomAccess,
   createMessage,
@@ -134,6 +137,26 @@ function isId(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 64;
 }
 
+/**
+ * Errors the chat service throws on purpose, with messages written for users.
+ * Anything else (a database or driver error) is replaced by a generic message
+ * so internals never travel to the client.
+ */
+const USER_FACING_ERRORS = new Set([
+  "Message not found",
+  "Not your message",
+  "Message was deleted",
+  "This message can no longer be edited",
+  "This message can no longer be deleted",
+  "Invalid reaction",
+  "Room not found",
+  "Access denied",
+]);
+
+function clientMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && USER_FACING_ERRORS.has(err.message) ? err.message : fallback;
+}
+
 function senderIdOf(data: SocketData): string {
   return (data.customerId ?? data.shopkeeperId)!;
 }
@@ -217,6 +240,27 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
     const myViewerKey = viewerKeyOf(ctx);
 
     socket.join(personalRoom(myViewerKey));
+    socketConnections.inc();
+
+    /**
+     * Registers a client event handler that runs under its own correlation id, so
+     * everything one event triggers (queries, errors) can be found by one id.
+     */
+    function listen<E extends keyof ClientToServerEvents>(event: E, handler: ClientToServerEvents[E]): void {
+      const run = handler as unknown as (...args: unknown[]) => unknown;
+      const wrapped = (...args: unknown[]) =>
+        withNewRequestId("ws", () => {
+          try {
+            const result = run(...args);
+            if (result instanceof Promise) {
+              result.catch((err: unknown) => logger.error("Socket handler failed", err, { event }));
+            }
+          } catch (err) {
+            logger.error("Socket handler failed", err, { event });
+          }
+        });
+      (socket.on as unknown as (e: string, l: unknown) => void).call(socket, event, wrapped);
+    }
 
     function stopTyping(roomId: string) {
       if (!socket.data.typingRooms.has(roomId)) return;
@@ -229,11 +273,12 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
       });
     }
 
-    socket.on("room:join", async ({ roomId }) => {
+    listen("room:join", async ({ roomId }) => {
       if (!isId(roomId)) return;
       try {
         await assertRoomAccess(roomId, ctx);
-      } catch {
+      } catch (err) {
+        logger.warn("Socket room join denied", { roomId }, err);
         socket.emit("error", { message: "Access denied" });
         return;
       }
@@ -256,7 +301,7 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
       }
     });
 
-    socket.on("room:leave", ({ roomId }) => {
+    listen("room:leave", ({ roomId }) => {
       if (!isId(roomId)) return;
       socket.leave(roomId);
       if (socket.data.customerId) {
@@ -266,7 +311,7 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
       stopTyping(roomId);
     });
 
-    socket.on("message:send", async ({ roomId, text, replyToId }) => {
+    listen("message:send", async ({ roomId, text, replyToId }) => {
       if (!isId(roomId) || typeof text !== "string") return;
       if (replyToId !== undefined && !isId(replyToId)) return;
       const trimmed = text.trim();
@@ -286,12 +331,13 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
         await assertRoomAccess(roomId, ctx);
         const message = await createMessage(roomId, trimmed, ctx, replyToId);
         io.to(roomId).emit("message:new", message);
-      } catch {
+      } catch (err) {
+        logger.warn("Socket message send failed", { roomId }, err);
         socket.emit("error", { message: "Could not send message" });
       }
     });
 
-    socket.on("message:edit", async ({ roomId, messageId, text }) => {
+    listen("message:edit", async ({ roomId, messageId, text }) => {
       if (!isId(roomId) || !isId(messageId) || typeof text !== "string") return;
       const trimmed = text.trim();
       if (!trimmed || trimmed.length > 2000) {
@@ -307,13 +353,12 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
         const updated = await editMessage(roomId, messageId, trimmed, ctx);
         io.to(roomId).emit("message:updated", updated);
       } catch (err) {
-        socket.emit("error", {
-          message: err instanceof Error ? err.message : "Could not edit message",
-        });
+        logger.warn("Socket message edit failed", { roomId }, err);
+        socket.emit("error", { message: clientMessage(err, "Could not edit message") });
       }
     });
 
-    socket.on("message:delete", async ({ roomId, messageId, scope }) => {
+    listen("message:delete", async ({ roomId, messageId, scope }) => {
       if (!isId(roomId) || !isId(messageId) || (scope !== "everyone" && scope !== "me")) return;
       if (isRateLimited(socket.id)) {
         socket.emit("error", { message: "You're sending messages too fast" });
@@ -328,13 +373,12 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
           socket.emit("message:removed", { roomId, messageId });
         }
       } catch (err) {
-        socket.emit("error", {
-          message: err instanceof Error ? err.message : "Could not delete message",
-        });
+        logger.warn("Socket message delete failed", { roomId }, err);
+        socket.emit("error", { message: clientMessage(err, "Could not delete message") });
       }
     });
 
-    socket.on("message:react", async ({ roomId, messageId, emoji }) => {
+    listen("message:react", async ({ roomId, messageId, emoji }) => {
       if (!isId(roomId) || !isId(messageId) || typeof emoji !== "string" || !emoji) return;
       if (isRateLimited(socket.id)) {
         socket.emit("error", { message: "You're sending messages too fast" });
@@ -344,12 +388,13 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
         await assertRoomAccess(roomId, ctx);
         const reactions = await reactToMessage(roomId, messageId, emoji, ctx);
         io.to(roomId).emit("message:reacted", { roomId, messageId, reactions });
-      } catch {
+      } catch (err) {
+        logger.warn("Socket reaction failed", { roomId }, err);
         socket.emit("error", { message: "Could not react to message" });
       }
     });
 
-    socket.on("room:read", async ({ roomId, at }) => {
+    listen("room:read", async ({ roomId, at }) => {
       if (!isId(roomId) || typeof at !== "string") return;
       const atDate = new Date(at);
       if (Number.isNaN(atDate.getTime())) return;
@@ -367,18 +412,19 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
       }
     });
 
-    socket.on("chat:clear", async ({ roomId }) => {
+    listen("chat:clear", async ({ roomId }) => {
       if (!isId(roomId)) return;
       try {
         await assertRoomAccess(roomId, ctx);
         const clearedAt = await clearRoomForViewer(roomId, ctx);
         socket.emit("chat:cleared", { roomId, clearedAt: clearedAt.toISOString() });
-      } catch {
+      } catch (err) {
+        logger.warn("Socket chat clear failed", { roomId }, err);
         socket.emit("error", { message: "Could not clear chat" });
       }
     });
 
-    socket.on("typing:start", ({ roomId }) => {
+    listen("typing:start", ({ roomId }) => {
       // Only rooms this socket was admitted to (room:join checks membership);
       // otherwise anyone could spoof "X is typing" into a room they can't see.
       if (!isId(roomId) || !socket.rooms.has(roomId)) return;
@@ -391,12 +437,13 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
       });
     });
 
-    socket.on("typing:stop", ({ roomId }) => {
+    listen("typing:stop", ({ roomId }) => {
       if (!isId(roomId)) return;
       stopTyping(roomId);
     });
 
     socket.on("disconnect", () => {
+      socketConnections.dec();
       for (const roomId of socket.data.typingRooms) stopTyping(roomId);
       if (socket.data.customerId) {
         for (const [roomId, ids] of presenceByRoom) {

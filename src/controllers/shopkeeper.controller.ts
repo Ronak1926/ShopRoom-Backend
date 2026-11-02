@@ -22,6 +22,9 @@ import { NotificationError } from "../utils/notificationError.js";
 import { revokeSessions } from "../services/session.service.js";
 import { deleteShopkeeperAccount } from "../services/shopkeeperAccount.service.js";
 import { disconnectViewer } from "../realtime/socket.js";
+import { logger } from "../lib/logger.js";
+import { paymentVerifications, razorpayWebhooks } from "../lib/metrics.js";
+import { recordPaymentFailure, recordWebhookFailure } from "../services/alerting.service.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -136,7 +139,7 @@ export async function initDraft(req: Request, res: Response): Promise<void> {
     );
     res.json(result);
   } catch (err) {
-    console.error("Draft init:", (err as Error)?.message);
+    logger.error("Draft init", err);
     res
       .status(400)
       .json({
@@ -167,7 +170,7 @@ export async function updateDraft(req: Request, res: Response): Promise<void> {
     );
     res.json({ message: "Draft updated" });
   } catch (err) {
-    console.error("Draft update:", (err as Error)?.message);
+    logger.error("Draft update", err);
     res
       .status(400)
       .json({
@@ -202,7 +205,7 @@ export async function validatePhone(
       carrier: result.carrier,
     });
   } catch (err) {
-    console.error("Phone validate:", (err as Error)?.message);
+    logger.error("Phone validate", err);
     res.status(500).json({ message: "Validation failed, please try again" });
   }
 }
@@ -222,7 +225,7 @@ export async function sendPhoneOtpHandler(
     await sendPhoneOtp(parsed.data.draftId, parsed.data.phoneNumber);
     res.json({ message: "OTP sent" });
   } catch (err) {
-    console.error("Phone OTP send:", (err as Error)?.message);
+    logger.error("Phone OTP send", err);
     if (err instanceof VerifyError) {
       res.status(422).json({ message: err.message });
       return;
@@ -260,7 +263,7 @@ export async function verifyPhoneOtpHandler(
       res.status(422).json({ message: err.message });
       return;
     }
-    console.error("OTP verify:", (err as Error)?.message);
+    logger.error("OTP verify", err);
     res
       .status(400)
       .json({
@@ -282,7 +285,7 @@ export async function createPaymentOrder(
     const result = await createOrder(parsed.data.draftId, parsed.data.planType);
     res.json(result);
   } catch (err) {
-    console.error("Create order:", (err as Error)?.message);
+    logger.error("Create order", err);
     res
       .status(400)
       .json({
@@ -308,6 +311,7 @@ export async function verifyPayment(
       parsed.data.razorpaySignature,
       parsed.data.planType,
     );
+    paymentVerifications.inc({ outcome: "success" });
     res.json({
       message: "Payment verified. Registration complete.",
       token: signShopkeeperToken(registration.shopkeeperId, 0),
@@ -318,7 +322,9 @@ export async function verifyPayment(
       inviteLink: registration.inviteLink,
     });
   } catch (err) {
-    console.error("Payment verify:", (err as Error)?.message);
+    paymentVerifications.inc({ outcome: "failure" });
+    recordPaymentFailure();
+    logger.error("Payment verify", err);
     res
       .status(err instanceof RegistrationError ? err.status : 500)
       .json({
@@ -343,7 +349,9 @@ export async function handleWebhook(
   }
 
   if (!verifyWebhookSignature(rawBody, signature)) {
-    console.warn("[Webhook] Invalid signature — ignoring event");
+    logger.warn("Razorpay webhook rejected: invalid signature");
+    razorpayWebhooks.inc({ result: "invalid_signature" });
+    recordWebhookFailure();
     res.status(401).json({ message: "Invalid webhook signature" });
     return;
   }
@@ -359,6 +367,7 @@ export async function handleWebhook(
   try {
     event = JSON.parse(rawBody);
   } catch {
+    razorpayWebhooks.inc({ result: "invalid_body" });
     res.status(400).json({ message: "Invalid JSON body" });
     return;
   }
@@ -368,17 +377,16 @@ export async function handleWebhook(
 
   switch (eventType) {
     case "payment.captured":
-      console.log(
-        `[Webhook] payment.captured — paymentId: ${payment?.id}, amount: ₹${(payment?.amount ?? 0) / 100}`,
-      );
+      razorpayWebhooks.inc({ result: "captured" });
+      logger.info("Razorpay payment captured", { paymentId: payment?.id, amountInr: (payment?.amount ?? 0) / 100 });
       break;
     case "payment.failed":
-      console.warn(
-        `[Webhook] payment.failed — paymentId: ${payment?.id}, reason: ${payment?.error_description}`,
-      );
+      razorpayWebhooks.inc({ result: "payment_failed" });
+      logger.warn("Razorpay payment failed", { paymentId: payment?.id, reason: payment?.error_description });
       break;
     default:
-      console.log(`[Webhook] Unhandled event: ${eventType}`);
+      razorpayWebhooks.inc({ result: "ignored" });
+      logger.info("Razorpay webhook ignored", { eventType });
   }
 
   res.json({ received: true });
@@ -399,7 +407,7 @@ export async function uploadLogo(req: Request, res: Response): Promise<void> {
     await updateShopkeeperDraft(parsed.data.draftId, 2, { logoUrl });
     res.json({ logoUrl });
   } catch (err) {
-    console.error("Logo upload:", (err as Error)?.message);
+    logger.error("Logo upload", err);
     res
       .status(err instanceof RegistrationError ? err.status : 500)
       .json({ message: safeMessage(err, "Failed to upload logo. Please try again.") });
@@ -440,7 +448,7 @@ export async function loginShopkeeper(
       shopName: shopkeeper.shopName,
     });
   } catch (err) {
-    console.error("Shopkeeper login:", (err as Error)?.message);
+    logger.error("Shopkeeper login", err);
     res.status(500).json({ message: "Login failed. Please try again." });
   }
 }
@@ -483,7 +491,7 @@ export async function deleteShopkeeperAccountHandler(req: Request, res: Response
     disconnectViewer(`SK:${shopkeeperId}`);
     res.json({ message: "Your account has been deleted" });
   } catch (err) {
-    console.error("Shopkeeper delete:", (err as Error)?.message);
+    logger.error("Shopkeeper delete", err);
     res.status(500).json({ message: "Could not delete the account. Please try again." });
   }
 }

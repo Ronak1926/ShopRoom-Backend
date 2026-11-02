@@ -19,6 +19,7 @@ import { buildInviteLink } from "../utils/inviteCode.js";
 import { uploadImageToCloudinary } from "../lib/cloudinary.js";
 import { parseBody } from "../utils/validate.js";
 import type { GeoJsonPoint } from "../types/index.js";
+import { logger } from "../lib/logger.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -386,7 +387,7 @@ export async function updateShopProfile(
     });
   } catch (err: unknown) {
     const e = err as Error;
-    console.error("[shop] updateShopProfile:", e.message);
+    logger.error("[shop] updateShopProfile", err);
     res.status(500).json({ message: "Failed to update profile" });
   }
 }
@@ -409,7 +410,7 @@ export async function getInvitePreview(
       res.status(404).json({ message: "Invalid or expired invite link" });
       return;
     }
-    console.error("[shop] getInvitePreview:", e.message);
+    logger.error("[shop] getInvitePreview", err);
     res.status(500).json({ message: "Something went wrong" });
   }
 }
@@ -452,7 +453,7 @@ export async function joinShopRoom(req: Request, res: Response): Promise<void> {
       res.status(404).json({ message: "Invalid or expired invite link" });
       return;
     }
-    console.error("[shop] joinShopRoom:", e.message);
+    logger.error("[shop] joinShopRoom", err);
     res.status(500).json({ message: "Something went wrong" });
   }
 }
@@ -475,7 +476,7 @@ export async function leaveShopRoom(
     res.json({ message: "Left the room" });
   } catch (err: unknown) {
     const e = err as Error;
-    console.error("[shop] leaveShopRoom:", e.message);
+    logger.error("[shop] leaveShopRoom", err);
     res.status(500).json({ message: "Something went wrong" });
   }
 }
@@ -553,7 +554,7 @@ export async function updateRoomImages(
     });
   } catch (err: unknown) {
     const e = err as Error;
-    console.error("[shop] updateRoomImages:", e.message);
+    logger.error("[shop] updateRoomImages", err);
     res.status(500).json({ message: "Failed to upload images" });
   }
 }

@@ -21,6 +21,9 @@ import { kindFromLegs, usesRadius } from "./notificationAudience.service.js";
 import { dispatchSend } from "./notificationDispatch.service.js";
 import { specFromSchedule } from "./notificationSchedule.service.js";
 import { reserveSend, type NewSend } from "./notificationUsage.service.js";
+import { logger } from "../lib/logger.js";
+import { notificationSends, schedulerRuns } from "../lib/metrics.js";
+import { withNewRequestId } from "../lib/requestContext.js";
 
 const POLL_INTERVAL_MS = 30_000;
 const CLAIM_BATCH = 20;
@@ -93,7 +96,8 @@ async function deliver(sendId: string, speed: "STANDARD" | "PRIORITY", joinedBef
   try {
     await dispatchSend(sendId, { deliverySpeed: speed, membersJoinedBefore: joinedBefore });
   } catch (err) {
-    console.error("Scheduled dispatch failed:", (err as { message?: string })?.message);
+    logger.error("Scheduled dispatch failed", err);
+    notificationSends.inc({ status: "FAILED" });
     await prisma.notificationSend.update({
       where: { id: sendId },
       data: { status: "FAILED", failureReason: "DISPATCH_ERROR" },
@@ -131,6 +135,7 @@ async function runSchedule(scheduleId: string): Promise<void> {
   };
 
   if (missed) {
+    schedulerRuns.inc({ result: "missed" });
     await recordFailedSend(send, "MISSED_WINDOW");
   } else {
     let sendId: string | null = null;
@@ -138,6 +143,7 @@ async function runSchedule(scheduleId: string): Promise<void> {
       sendId = (await reserveSend(send, schedule.shopkeeper.planType)).id;
     } catch (err) {
       if (err instanceof NotificationError && err.status === 429) {
+        schedulerRuns.inc({ result: "limit_reached" });
         await recordFailedSend(send, "DAILY_LIMIT_REACHED");
       } else if (!isUniqueViolation(err)) {
         // Unexpected: leave the claim to expire so the occurrence is retried
@@ -146,6 +152,7 @@ async function runSchedule(scheduleId: string): Promise<void> {
       }
     }
     if (sendId) {
+      schedulerRuns.inc({ result: "sent" });
       await deliver(
         sendId,
         schedule.deliverySpeed,
@@ -187,9 +194,12 @@ export async function failStalePendingSends(now = new Date()): Promise<number> {
 export async function runDueSchedules(now = new Date()): Promise<number> {
   const ids = await claimDueSchedules(now);
   await mapWithConcurrency(ids, RUN_CONCURRENCY, (id) =>
-    runSchedule(id).catch((err) => {
-      console.error("Schedule run failed:", id, (err as { message?: string })?.message);
-    }),
+    // Each occurrence gets its own correlation id so its logs can be followed end to end.
+    withNewRequestId("job-schedule", () =>
+      runSchedule(id).catch((err) => {
+        logger.error("Schedule run failed", err, { scheduleId: id });
+      }),
+    ),
   );
   return ids.length;
 }
@@ -200,16 +210,19 @@ let ticking = false;
 async function tick(): Promise<void> {
   if (ticking) return;
   ticking = true;
-  try {
-    await failStalePendingSends();
-    for (let batch = 0; batch < MAX_BATCHES_PER_TICK; batch += 1) {
-      if ((await runDueSchedules()) < CLAIM_BATCH) break;
+  await withNewRequestId("job-tick", async () => {
+    try {
+      const staleSends = await failStalePendingSends();
+      if (staleSends > 0) logger.warn("Failed sends that never finished", { count: staleSends });
+      for (let batch = 0; batch < MAX_BATCHES_PER_TICK; batch += 1) {
+        if ((await runDueSchedules()) < CLAIM_BATCH) break;
+      }
+    } catch (err) {
+      logger.error("Scheduler tick failed", err);
+    } finally {
+      ticking = false;
     }
-  } catch (err) {
-    console.error("Scheduler tick failed:", (err as { message?: string })?.message);
-  } finally {
-    ticking = false;
-  }
+  });
 }
 
 export function startNotificationScheduler(): void {

@@ -27,6 +27,7 @@ export async function connectTestEnvironment() {
   }
   process.env.DATABASE_URL = url;
   process.env.JWT_SECRET = "integration-test-secret";
+  process.env.LOG_LEVEL ??= "silent";
 
   const { privateKey } = generateKeyPairSync("rsa", {
     modulusLength: 2048,

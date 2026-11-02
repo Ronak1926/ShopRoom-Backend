@@ -35,6 +35,7 @@
 import Razorpay from "razorpay";
 import crypto from "crypto";
 import { isProduction } from "../config/env.js";
+import { logger } from "./logger.js";
 
 // ─── Client factory ───────────────────────────────────────────────────────────
 
@@ -83,11 +84,10 @@ export async function createRazorpayOrder(
   if (!client) {
     // Without credentials a "mock" order would let anyone register for free.
     if (isProduction()) throw new Error("Payments are not configured");
-    console.warn(
-      `\n⚠️  [Razorpay] Credentials not configured — returning mock order.\n` +
-        `   Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env\n` +
-        `   DEV: amount ₹${amount / 100}, receipt: ${receipt}\n`,
-    );
+    logger.warn("Razorpay credentials not configured: returning a mock order (development only)", {
+      amountInr: amount / 100,
+      receipt,
+    });
     return {
       orderId: `order_mock_${receipt}_${Date.now()}`,
       amount,
@@ -135,9 +135,7 @@ export function verifyPaymentSignature(
   if (!keySecret) {
     // Dev fallback only: skipping verification in production would make every payment "valid".
     if (isProduction()) return false;
-    console.warn(
-      "[Razorpay] KEY_SECRET not set — skipping signature verification in dev mode",
-    );
+    logger.warn("RAZORPAY_KEY_SECRET not set: skipping signature verification (development only)");
     return true;
   }
 
@@ -179,7 +177,7 @@ export function verifyWebhookSignature(
 
   if (!webhookSecret) {
     // Fail closed everywhere: an unsigned webhook is indistinguishable from a forged one.
-    console.warn("[Razorpay] RAZORPAY_WEBHOOK_SECRET not set — rejecting webhook");
+    logger.warn("RAZORPAY_WEBHOOK_SECRET not set: rejecting webhook");
     return false;
   }
 

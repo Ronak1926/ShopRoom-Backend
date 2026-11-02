@@ -30,7 +30,7 @@ export interface CallResult {
 export async function startTestApp() {
   process.env.TRUST_PROXY_HOPS = "1";
   const env = await connectTestEnvironment();
-  const { app, routeMounts } = await import("../app.js");
+  const { app, allRouteMounts } = await import("../app.js");
   const jwt = await import("../utils/jwt.js");
   const session = await import("../services/session.service.js");
 
@@ -72,7 +72,7 @@ export async function startTestApp() {
   return {
     ...env,
     app,
-    routeMounts,
+    routeMounts: allRouteMounts,
     baseUrl,
     call,
     newClientIp,

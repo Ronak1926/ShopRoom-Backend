@@ -1,0 +1,79 @@
+# Alert rules for Prometheus. Metric names are documented in OBSERVABILITY.md.
+# Adjust thresholds to real traffic after a few weeks of data.
+groups:
+  - name: shoproom-api
+    rules:
+      - alert: ApiDown
+        expr: up{job="shoproom-api"} == 0
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: "ShopRoom API is not answering scrapes"
+          runbook: "docs/ops/RUNBOOK.md#api-is-down"
+
+      - alert: HighServerErrorRate
+        expr: |
+          sum(rate(http_requests_total{status="5xx"}[5m]))
+            / clamp_min(sum(rate(http_requests_total[5m])), 1) > 0.05
+          and sum(rate(http_requests_total[5m])) > 0.2
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "More than 5% of requests are failing with 5xx"
+          runbook: "docs/ops/RUNBOOK.md#elevated-5xx-or-a-bad-deploy"
+
+      - alert: SlowApi
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m]))) > 1
+        for: 10m
+        labels: { severity: ticket }
+        annotations:
+          summary: "API p95 latency above 1 second"
+
+  - name: shoproom-money-and-trust
+    rules:
+      - alert: PaymentVerificationFailing
+        expr: increase(payment_verifications_total{outcome="failure"}[10m]) >= 3
+        labels: { severity: page }
+        annotations:
+          summary: "Payments are failing verification"
+          runbook: "docs/ops/RUNBOOK.md#razorpay-is-down-or-payments-fail"
+
+      - alert: WebhookSignatureFailures
+        expr: increase(razorpay_webhook_events_total{result="invalid_signature"}[10m]) >= 3
+        labels: { severity: page }
+        annotations:
+          summary: "Razorpay webhooks are failing their signature check (wrong secret, or forged calls)"
+          runbook: "docs/ops/RUNBOOK.md#razorpay-is-down-or-payments-fail"
+
+      - alert: PushDeliveryFailing
+        expr: |
+          sum(increase(notification_device_results_total{result="failure"}[15m]))
+            / clamp_min(sum(increase(notification_device_results_total[15m])), 1) > 0.5
+          and sum(increase(notification_device_results_total[15m])) >= 20
+        labels: { severity: page }
+        annotations:
+          summary: "More than half of push deliveries are failing"
+          runbook: "docs/ops/RUNBOOK.md#fcm-push-is-down-or-failing"
+
+      - alert: NoSuccessfulSends
+        expr: |
+          sum(increase(notification_sends_total{status="FAILED"}[30m])) >= 3
+          and sum(increase(notification_sends_total{status="SENT"}[30m])) == 0
+        labels: { severity: ticket }
+        annotations:
+          summary: "Several sends failed and none succeeded in 30 minutes"
+
+      - alert: ScheduledSendsMissed
+        expr: increase(scheduler_runs_total{result="missed"}[1h]) > 0
+        labels: { severity: ticket }
+        annotations:
+          summary: "Scheduled sends were skipped as too late (scheduler down or overloaded)"
+          runbook: "docs/ops/RUNBOOK.md#scheduled-sends-did-not-fire"
+
+      - alert: FrontEndErrorSpike
+        expr: increase(client_errors_total[15m]) > 50
+        labels: { severity: ticket }
+        annotations:
+          summary: "The web app is reporting many errors (likely a bad front-end deploy)"
+          runbook: "docs/ops/RUNBOOK.md#elevated-5xx-or-a-bad-deploy"

@@ -4,6 +4,9 @@ import cors from "cors";
 import { allowedOrigins, trustProxySetting } from "./config/env.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { globalLimiter } from "./middleware/rateLimiters.js";
+import { requestLogger } from "./middleware/requestLogger.js";
+import { opsRouter } from "./routes/ops.js";
+import { clientErrorsRouter } from "./routes/clientErrors.js";
 import { securityHeaders } from "./middleware/securityHeaders.js";
 import { customersRouter } from "./routes/customers.js";
 import { otpRouter } from "./routes/otp.js";
@@ -20,6 +23,11 @@ app.disable("x-powered-by");
 app.set("trust proxy", trustProxySetting());
 
 app.use(securityHeaders);
+app.use(requestLogger);
+
+// Monitoring endpoints sit before CORS and the global limiter so uptime checks
+// and metric scrapes are never throttled or blocked by browser rules.
+app.use(opsRouter);
 
 // Browser callers must be on the allow-list (CORS_ORIGINS). Requests with no
 // Origin header (server-to-server, mobile apps, curl) aren't subject to CORS.
@@ -76,7 +84,10 @@ export const routeMounts: { prefix: string; router: Router }[] = [
   { prefix: "/api/rooms", router: messagesRouter },
   { prefix: "/api/notifications", router: notificationDeliveryRouter },
   { prefix: "/api/notifications", router: notificationsRouter },
+  { prefix: "/api/client-errors", router: clientErrorsRouter },
 ];
+/** Every router, including the monitoring one mounted earlier; used by tests to inventory routes. */
+export const allRouteMounts = [{ prefix: "", router: opsRouter }, ...routeMounts];
 for (const { prefix, router } of routeMounts) app.use(prefix, router);
 
 app.use(notFoundHandler);

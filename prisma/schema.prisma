@@ -53,6 +53,8 @@ model PlanPayment {
   razorpayOrderId   String             @unique
   razorpayPaymentId String             @unique
   createdAt         DateTime           @default(now())
+  /// Set when the money was returned from the Razorpay dashboard; the plan time it bought was taken back.
+  refundedAt        DateTime?
 
   @@index([shopkeeperId, createdAt(sort: Desc)])
 }
@@ -119,6 +121,38 @@ enum AccountRole {
 /// A one-time "set a new password" link. Only a SHA-256 of the token is stored.
 /// accountId is not a foreign key because it points at one of two tables; account
 /// deletion and the retention job remove the rows.
+enum SecurityEventType {
+  LOGIN_SUCCESS
+  LOGIN_FAILED
+  PASSWORD_CHANGED
+  PASSWORD_RESET
+  SESSIONS_REVOKED
+  DATA_EXPORTED
+  REAUTH_FAILED
+  MFA_ENABLED
+  MFA_DISABLED
+  MFA_FAILED
+  MFA_RECOVERY_USED
+}
+
+/// Sensitive things that happened to an account. actorId is not a foreign key: a failed sign-in for an
+/// address with no account has none, and the rows are erased with the account by the deletion code.
+model SecurityEvent {
+  id        String            @id @default(cuid())
+  type      SecurityEventType
+  actorRole AccountRole
+  actorId   String?
+  ip        String?
+  userAgent String?
+  /// Small, non-secret context such as the sign-in method. Never a password, token, code or email.
+  detail    Json?
+  createdAt DateTime          @default(now())
+
+  @@index([actorRole, actorId, createdAt(sort: Desc)])
+  @@index([type, createdAt])
+  @@index([createdAt])
+}
+
 model PasswordResetToken {
   id        String      @id @default(cuid())
   role      AccountRole

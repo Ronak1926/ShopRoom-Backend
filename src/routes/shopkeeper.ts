@@ -18,6 +18,7 @@ import {
 } from "../controllers/shopkeeper.controller.js";
 import { createPaymentOrder, handleWebhook, verifyPayment } from "../controllers/payment.controller.js";
 import { exportShopkeeperDataHandler } from "../controllers/dataExport.controller.js";
+import { listShopkeeperSecurityEventsHandler } from "../controllers/securityEvents.controller.js";
 import { requireShopkeeperAuth } from "../middleware/shopkeeperAuth.js";
 import {
   changePasswordHandler,
@@ -102,6 +103,7 @@ shopkeeperRouter.post("/billing/order", requireShopkeeperAuth, paymentLimiter, c
 shopkeeperRouter.post("/billing/verify", requireShopkeeperAuth, paymentLimiter, verifyRenewalHandler);
 shopkeeperRouter.post("/logout-all", requireShopkeeperAuth, logoutAllShopkeeperHandler);
 shopkeeperRouter.post("/me/export", requireShopkeeperAuth, dataExportLimiter, exportShopkeeperDataHandler);
+shopkeeperRouter.get("/me/security-events", requireShopkeeperAuth, listShopkeeperSecurityEventsHandler);
 shopkeeperRouter.delete(
   "/me",
   requireShopkeeperAuth,

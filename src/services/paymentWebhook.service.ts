@@ -16,6 +16,7 @@ import { prisma } from "../database/prisma.js";
 import { logger } from "../lib/logger.js";
 import { raiseAlert } from "./alerting.service.js";
 import { settlePayment } from "./paymentSettlement.service.js";
+import { isPlanId, PLANS, DAY_MS } from "./plans.js";
 
 export type WebhookOutcome =
   | "fulfilled"
@@ -25,14 +26,21 @@ export type WebhookOutcome =
   | "unknown_order"
   | "mismatch"
   | "payment_failed"
+  | "refunded_externally"
+  | "partial_refund"
   | "ignored";
 
 const id = (prefix: string) => z.string().regex(new RegExp(`^${prefix}_[A-Za-z0-9_]{1,80}$`));
 
 const envelope = z.object({
   event: z.string().max(64),
-  payload: z.looseObject({ payment: z.object({ entity: z.record(z.string(), z.unknown()) }).optional() }),
+  payload: z.looseObject({
+    payment: z.object({ entity: z.record(z.string(), z.unknown()) }).optional(),
+    refund: z.object({ entity: z.record(z.string(), z.unknown()) }).optional(),
+  }),
 });
+
+const processedRefund = z.object({ id: id("rfnd"), payment_id: id("pay"), amount: z.number().int().positive() });
 
 const capturedPayment = z.object({
   id: id("pay"),
@@ -45,6 +53,53 @@ const capturedPayment = z.object({
 /** Events that mean "the money is in". `order.paid` is Razorpay's recommended one; both carry the payment. */
 const PAID_EVENTS = new Set(["order.paid", "payment.captured"]);
 
+/**
+ * Money returned from the Razorpay dashboard (we never start these). A full refund takes back
+ * what the payment bought: the days it added come off the plan, and the payment is marked in the
+ * billing history. A partial refund changes nothing and is raised for a person to decide.
+ * Refunds we issue ourselves are never here: those orders are no longer FULFILLED.
+ */
+async function handleProcessedRefund(refundEntity: unknown, paymentEntity: Record<string, unknown> | undefined): Promise<WebhookOutcome> {
+  const refund = processedRefund.safeParse(refundEntity);
+  if (!refund.success) return "ignored";
+  const { id: refundId, payment_id: paymentId, amount } = refund.data;
+
+  const order = await prisma.paymentOrder.findUnique({ where: { razorpayPaymentId: paymentId } });
+  if (!order || order.status !== "FULFILLED") return "ignored";
+
+  const totalRefunded = Math.max(amount, typeof paymentEntity?.amount_refunded === "number" ? paymentEntity.amount_refunded : 0);
+  if (totalRefunded < order.amount) {
+    logger.warn("Partial refund made in the Razorpay dashboard; the plan was left alone", { orderId: order.id, paymentId, refunded: totalRefunded, paid: order.amount });
+    void raiseAlert("refund_external", `Partial refund (${totalRefunded} of ${order.amount} paise) on payment ${paymentId}: decide by hand whether to shorten the plan`);
+    return "partial_refund";
+  }
+
+  const applied = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "PaymentOrder" WHERE "id" = ${order.id} FOR UPDATE`;
+    const locked = await tx.paymentOrder.findUniqueOrThrow({ where: { id: order.id } });
+    if (locked.status !== "FULFILLED") return false;
+
+    if (locked.shopkeeperId && isPlanId(locked.planType)) {
+      const [owner] = await tx.$queryRaw<{ planExpiresAt: Date }[]>`SELECT "planExpiresAt" FROM "Shopkeeper" WHERE "id" = ${locked.shopkeeperId} FOR UPDATE`;
+      if (owner) {
+        const takenBack = owner.planExpiresAt.getTime() - PLANS[locked.planType].days * DAY_MS;
+        await tx.shopkeeper.update({ where: { id: locked.shopkeeperId }, data: { planExpiresAt: new Date(Math.max(takenBack, Date.now())) } });
+      }
+    }
+    await tx.planPayment.updateMany({ where: { razorpayPaymentId: paymentId }, data: { refundedAt: new Date() } });
+    await tx.paymentOrder.update({
+      where: { id: locked.id },
+      data: { status: "REFUNDED", razorpayRefundId: refundId, failureReason: "refunded from the Razorpay dashboard" },
+    });
+    return true;
+  });
+  if (!applied) return "ignored";
+
+  logger.warn("Payment refunded from the Razorpay dashboard; plan time taken back", { orderId: order.id, paymentId, purpose: order.purpose });
+  void raiseAlert("refund_external", `Payment ${paymentId} was refunded in the Razorpay dashboard; ${PLANS[order.planType as keyof typeof PLANS]?.days ?? "?"} days were taken off the plan`);
+  return "refunded_externally";
+}
+
 export async function handleRazorpayEvent(body: unknown): Promise<WebhookOutcome> {
   const parsed = envelope.safeParse(body);
   if (!parsed.success) return "ignored";
@@ -56,6 +111,7 @@ export async function handleRazorpayEvent(body: unknown): Promise<WebhookOutcome
     logger.warn("Razorpay payment failed", { orderId: entity?.order_id, code: entity?.error_code, reason: entity?.error_description });
     return "payment_failed";
   }
+  if (event === "refund.processed") return handleProcessedRefund(payload.refund?.entity, entity);
   if (!PAID_EVENTS.has(event) || !entity) return "ignored";
 
   const payment = capturedPayment.safeParse(entity);

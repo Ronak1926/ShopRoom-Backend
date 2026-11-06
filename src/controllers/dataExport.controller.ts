@@ -9,7 +9,9 @@
 import type { Request, Response } from "express";
 import z from "zod";
 import { logger } from "../lib/logger.js";
+import type { AccountRole } from "../generated/client.js";
 import { exportCustomerData, exportShopkeeperData } from "../services/dataExport.service.js";
+import { recordSecurityEvent } from "../services/securityEvent.service.js";
 import { confirmCustomerIdentity, confirmShopkeeperIdentity, type Reauthentication } from "../services/reauth.service.js";
 import { parseBody } from "../utils/validate.js";
 
@@ -31,10 +33,13 @@ function sendAsDownload(res: Response, kind: "customer" | "shopkeeper", data: un
 }
 
 /** Maps a failed proof to the response; returns true when the caller may go on. */
-function proceedOrRespond(res: Response, proof: Reauthentication, notFound: string): boolean {
+function proceedOrRespond(req: Request, res: Response, proof: Reauthentication, notFound: string, role: AccountRole, actorId: string): boolean {
   if (proof === "confirmed") return true;
   if (proof === "not-found") res.status(404).json({ message: notFound });
-  else res.status(403).json({ message: "Could not confirm your identity" });
+  else {
+    recordSecurityEvent(req, { type: "REAUTH_FAILED", role, actorId, detail: { action: "export_data" } });
+    res.status(403).json({ message: "Could not confirm your identity" });
+  }
   return false;
 }
 
@@ -47,12 +52,13 @@ export async function exportCustomerDataHandler(req: Request, res: Response): Pr
     return;
   }
   try {
-    if (!proceedOrRespond(res, await confirmCustomerIdentity(customerId, parsed.data), "Customer not found")) return;
+    if (!proceedOrRespond(req, res, await confirmCustomerIdentity(customerId, parsed.data), "Customer not found", "CUSTOMER", customerId)) return;
     const data = await exportCustomerData(customerId);
     if (!data) {
       res.status(404).json({ message: "Customer not found" });
       return;
     }
+    recordSecurityEvent(req, { type: "DATA_EXPORTED", role: "CUSTOMER", actorId: customerId });
     sendAsDownload(res, "customer", data);
   } catch (err) {
     logger.error("Customer data export", err);
@@ -69,12 +75,13 @@ export async function exportShopkeeperDataHandler(req: Request, res: Response): 
     return;
   }
   try {
-    if (!proceedOrRespond(res, await confirmShopkeeperIdentity(shopkeeperId, parsed.data.password), "Shopkeeper not found")) return;
+    if (!proceedOrRespond(req, res, await confirmShopkeeperIdentity(shopkeeperId, parsed.data.password), "Shopkeeper not found", "SHOPKEEPER", shopkeeperId)) return;
     const data = await exportShopkeeperData(shopkeeperId);
     if (!data) {
       res.status(404).json({ message: "Shopkeeper not found" });
       return;
     }
+    recordSecurityEvent(req, { type: "DATA_EXPORTED", role: "SHOPKEEPER", actorId: shopkeeperId });
     sendAsDownload(res, "shopkeeper", data);
   } catch (err) {
     logger.error("Shopkeeper data export", err);

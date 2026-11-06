@@ -257,7 +257,7 @@ export async function loginCustomer(input: {
   // Always runs a bcrypt comparison, so unknown emails cost the same time as wrong passwords.
   const ok = await verifyPassword(input.password, customer?.passwordHash);
   if (!customer || !ok) {
-    return { ok: false as const, reason: "INVALID_CREDENTIALS" as const };
+    return { ok: false as const, reason: "INVALID_CREDENTIALS" as const, customerId: customer?.id ?? null };
   }
 
   if (customer.passwordHash && needsRehash(customer.passwordHash)) {
@@ -303,6 +303,7 @@ export async function deleteCustomerAccount(customerId: string): Promise<string[
       });
     }
     await tx.passwordResetToken.deleteMany({ where: { role: "CUSTOMER", accountId: customerId } });
+    await tx.securityEvent.deleteMany({ where: { actorRole: "CUSTOMER", actorId: customerId } });
     await tx.customer.delete({ where: { id: customerId } });
     return ids;
   });

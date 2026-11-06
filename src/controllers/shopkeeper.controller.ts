@@ -21,6 +21,7 @@ import { revokeSessions } from "../services/session.service.js";
 import { deleteShopkeeperAccount } from "../services/shopkeeperAccount.service.js";
 import { disconnectViewer } from "../realtime/socket.js";
 import { logger } from "../lib/logger.js";
+import { recordSecurityEvent } from "../services/securityEvent.service.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -295,9 +296,11 @@ export async function loginShopkeeper(
     // Compares even when the email is unknown, so timing doesn't reveal which emails exist.
     const valid = await verifyPassword(parsed.data.password, shopkeeper?.passwordHash);
     if (!shopkeeper || !valid) {
+      recordSecurityEvent(req, { type: "LOGIN_FAILED", role: "SHOPKEEPER", actorId: shopkeeper?.id, detail: { method: "password" } });
       res.status(401).json({ message: "Invalid email or password" });
       return;
     }
+    recordSecurityEvent(req, { type: "LOGIN_SUCCESS", role: "SHOPKEEPER", actorId: shopkeeper.id, detail: { method: "password" } });
     if (needsRehash(shopkeeper.passwordHash)) {
       // Best effort: failing to upgrade the hash must not fail the login.
       await hashPassword(parsed.data.password)
@@ -322,6 +325,7 @@ export async function loginShopkeeper(
 
 export async function logoutAllShopkeeperHandler(req: Request, res: Response): Promise<void> {
   await revokeSessions("shopkeeper", req.shopkeeperId!);
+  recordSecurityEvent(req, { type: "SESSIONS_REVOKED", role: "SHOPKEEPER", actorId: req.shopkeeperId });
   disconnectViewer(`SK:${req.shopkeeperId}`);
   res.json({ message: "Signed out everywhere" });
 }
@@ -347,6 +351,7 @@ export async function deleteShopkeeperAccountHandler(req: Request, res: Response
     });
     const confirmed = await verifyPassword(parsed.data.password, shopkeeper?.passwordHash);
     if (!shopkeeper || !confirmed) {
+      recordSecurityEvent(req, { type: "REAUTH_FAILED", role: "SHOPKEEPER", actorId: shopkeeperId, detail: { action: "delete_account" } });
       res.status(403).json({ message: "Could not confirm your identity" });
       return;
     }

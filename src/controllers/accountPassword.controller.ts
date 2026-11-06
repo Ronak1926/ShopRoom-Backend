@@ -9,6 +9,7 @@ import type { Request, RequestHandler, Response } from "express";
 import z from "zod";
 import { signCustomerToken, signShopkeeperToken } from "../utils/jwt.js";
 import { newPasswordSchema } from "../utils/password.js";
+import { recordSecurityEvent } from "../services/securityEvent.service.js";
 import {
   changePassword,
   requestPasswordReset,
@@ -49,10 +50,12 @@ export function resetPasswordHandler(role: ResetRole): RequestHandler {
       res.status(400).json({ message: "Choose a password of 8 to 72 characters" });
       return;
     }
-    if (!(await resetPassword(role, parsed.data.token, parsed.data.password))) {
+    const accountId = await resetPassword(role, parsed.data.token, parsed.data.password);
+    if (!accountId) {
       res.status(400).json({ message: "This reset link is invalid or has expired. Request a new one." });
       return;
     }
+    recordSecurityEvent(req, { type: "PASSWORD_RESET", role, actorId: accountId });
     res.json({ message: "Password updated. You can sign in with it now." });
   };
 }
@@ -67,6 +70,7 @@ export function changePasswordHandler(role: ResetRole): RequestHandler {
     const accountId = (role === "CUSTOMER" ? req.customerId : req.shopkeeperId)!;
     const result = await changePassword(role, accountId, parsed.data.currentPassword, parsed.data.newPassword);
     if (!result.ok) {
+      if (result.reason === "WRONG_PASSWORD") recordSecurityEvent(req, { type: "REAUTH_FAILED", role, actorId: accountId, detail: { action: "change_password" } });
       res.status(result.reason === "NO_PASSWORD" ? 400 : 403).json({
         message:
           result.reason === "NO_PASSWORD"
@@ -75,6 +79,7 @@ export function changePasswordHandler(role: ResetRole): RequestHandler {
       });
       return;
     }
+    recordSecurityEvent(req, { type: "PASSWORD_CHANGED", role, actorId: accountId });
     // Every other session was signed out; hand back a fresh token so this one carries on.
     const token = role === "CUSTOMER" ? signCustomerToken(accountId, result.tokenVersion) : signShopkeeperToken(accountId, result.tokenVersion);
     res.json({ message: "Password changed. Other devices have been signed out.", token });

@@ -26,6 +26,8 @@ export const RETENTION = {
    * (7 days), so a payment this late could not be honoured anyway. Paid orders are never purged here.
    */
   unpaidOrderDays: 90,
+  /** Sign-in and account-change history: long enough to investigate an incident, no longer. */
+  securityEventDays: 365,
 } as const;
 
 export interface RetentionResult {
@@ -36,12 +38,13 @@ export interface RetentionResult {
   deliveryRecords: number;
   inactiveDevices: number;
   paymentOrders: number;
+  securityEvents: number;
 }
 
 export async function purgeExpiredData(now = new Date()): Promise<RetentionResult> {
   const ago = (days: number) => new Date(now.getTime() - days * DAY_MS);
 
-  const [resetTokens, rateLimitCounters, emailOtps, stalePositions, deliveryRecords, inactiveDevices, paymentOrders] = await Promise.all([
+  const [resetTokens, rateLimitCounters, emailOtps, stalePositions, deliveryRecords, inactiveDevices, paymentOrders, securityEvents] = await Promise.all([
     prisma.passwordResetToken.deleteMany({ where: { expiresAt: { lt: ago(RETENTION.emailOtpGraceDays) } } }),
     // Windows are at most an hour long; an expired counter does nothing and is only clutter.
     prisma.$executeRaw`DELETE FROM "RateLimitCounter" WHERE "resetAt" < now() - interval '1 hour'`,
@@ -59,6 +62,7 @@ export async function purgeExpiredData(now = new Date()): Promise<RetentionResul
     prisma.notificationSendRecipient.deleteMany({ where: { createdAt: { lt: ago(RETENTION.deliveryRecordDays) } } }),
     prisma.customerDevice.deleteMany({ where: { lastSeenAt: { lt: ago(RETENTION.inactiveDeviceDays) } } }),
     prisma.paymentOrder.deleteMany({ where: { status: "CREATED", createdAt: { lt: ago(RETENTION.unpaidOrderDays) } } }),
+    prisma.securityEvent.deleteMany({ where: { createdAt: { lt: ago(RETENTION.securityEventDays) } } }),
   ]);
 
   return {
@@ -69,6 +73,7 @@ export async function purgeExpiredData(now = new Date()): Promise<RetentionResul
     deliveryRecords: deliveryRecords.count,
     inactiveDevices: inactiveDevices.count,
     paymentOrders: paymentOrders.count,
+    securityEvents: securityEvents.count,
   };
 }
 

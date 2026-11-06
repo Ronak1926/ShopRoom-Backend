@@ -17,6 +17,7 @@ import { disconnectViewer, removeViewerFromRoom } from "../realtime/socket.js";
 import { newPasswordSchema } from "../utils/password.js";
 import { firebaseAuth } from "../lib/firebaseAdmin.js";
 import { confirmCustomerIdentity } from "../services/reauth.service.js";
+import { recordSecurityEvent } from "../services/securityEvent.service.js";
 
 const registerCustomerSchema = z
   .object({
@@ -179,9 +180,11 @@ export async function loginCustomerHandler(req: Request, res: Response) {
   });
 
   if (!result.ok) {
+    recordSecurityEvent(req, { type: "LOGIN_FAILED", role: "CUSTOMER", actorId: result.customerId, detail: { method: "password" } });
     return res.status(401).json({ message: "Invalid email or password" });
   }
 
+  recordSecurityEvent(req, { type: "LOGIN_SUCCESS", role: "CUSTOMER", actorId: result.customer.id, detail: { method: "password" } });
   const token = signCustomerToken(result.customer.id, result.tokenVersion);
   return res.json({
     token,
@@ -214,6 +217,7 @@ export async function googleAuthCustomerHandler(req: Request, res: Response) {
     fullName: name ?? email.split("@")[0],
   });
 
+  recordSecurityEvent(req, { type: "LOGIN_SUCCESS", role: "CUSTOMER", actorId: result.customer.id, detail: { method: "google" } });
   const token = signCustomerToken(result.customer.id, result.tokenVersion);
   return res.json({ token, customer: result.customer });
 }
@@ -223,6 +227,7 @@ export async function googleAuthCustomerHandler(req: Request, res: Response) {
 
 export async function logoutAllHandler(req: Request, res: Response) {
   await revokeSessions("customer", req.customerId!);
+  recordSecurityEvent(req, { type: "SESSIONS_REVOKED", role: "CUSTOMER", actorId: req.customerId });
   disconnectViewer(req.customerId!);
   return res.json({ message: "Signed out everywhere" });
 }
@@ -249,6 +254,7 @@ export async function deleteAccountHandler(req: Request, res: Response) {
     return res.status(404).json({ message: "Customer not found" });
   }
   if (proof !== "confirmed") {
+    recordSecurityEvent(req, { type: "REAUTH_FAILED", role: "CUSTOMER", actorId: customerId, detail: { action: "delete_account" } });
     return res.status(403).json({ message: "Could not confirm your identity" });
   }
 

@@ -57,6 +57,7 @@ A webhook is also compared with our row before anything is granted: it must be `
 | A second, different payment arrives for an already paid order | It is refunded; the order is untouched. |
 | Webhook with a wrong signature | 401, counted, alerts after 3 in 10 minutes. |
 | Webhook for an order this app did not create | Ignored (the Razorpay account may take other payments). |
+| A full refund is made in the Razorpay dashboard | The days that payment bought are taken off the plan, the order becomes `REFUNDED`, billing history shows "Refunded". Partial: alert, plan untouched. |
 | Webhook amount, currency or status does not match | Never granted, logged, alert raised for a person to look at. |
 | Our database fails mid-grant | Rolled back, webhook answers 500, Razorpay retries. Nothing is half applied. |
 | Razorpay is down when starting a payment | "The payment service is unavailable" (503 for a timeout or 5xx, 502 for a rejected key). No order row is left behind. |
@@ -74,7 +75,7 @@ A webhook is also compared with our row before anything is granted: it must be `
 2. **Webhook secret.** Dashboard → Settings → Webhooks → Add New Webhook.
    - URL: `https://<your-api-domain>/api/shopkeeper/payment/webhook`
    - Secret: any long random string (`openssl rand -hex 32`). Put the same value in `.env` as `RAZORPAY_WEBHOOK_SECRET`. It is **not** the API key secret.
-   - Active events: `order.paid`, `payment.captured`, `payment.failed`.
+   - Active events: `order.paid`, `payment.captured`, `payment.failed`, `refund.processed`.
    Razorpay must be able to reach the URL, so on a laptop use a tunnel (ngrok, cloudflared) and register the tunnel address.
 3. **Try it.** Sign up as a shopkeeper and pay in Checkout. Razorpay's test-mode instructions list test cards and UPI ids (for example card `4111 1111 1111 1111` with any future expiry and CVV, and UPI `success@razorpay` / `failure@razorpay`); check the dashboard for the current list. Then pay and close the tab straight away: the webhook should still create the account.
 4. **Go live.** Complete Razorpay's KYC, generate **live** keys (`rzp_live_…`), create a second webhook for the production URL with its own secret, and set all three variables in the production environment. The server refuses to start in production with a malformed `RAZORPAY_KEY_ID`, and logs a warning if it is a test key (payments would succeed without real money moving).
@@ -106,7 +107,7 @@ If one stays there, find the payment in the Razorpay dashboard and refund it by 
 
 Reconciling: every `FULFILLED` order has one `PlanPayment` row (the shopkeeper's billing history). Captured payments in the dashboard that have no `PaymentOrder` were not made through this app.
 
-Refunds started **from the dashboard** for a granted purchase are not detected and do not remove the plan. Refunds are not offered by default (see the Terms), so decide per case whether to also shorten the plan.
+Refunds started **from the dashboard** are detected through the `refund.processed` webhook event (enable it, see "Switching it on"). A **full** refund of a granted purchase takes back the plan days that purchase added (never below "now"), marks the order `REFUNDED` and shows "Refunded" next to the payment in the shopkeeper's billing history; the account itself stays, so they can renew. A **partial** refund changes nothing and raises a `refund_external` alert for you to decide (two part-refunds that add up to the whole count as a full one). Refunds we issue ourselves are not treated this way. Refunds are not offered by default (see the Terms), so this exists for the cases where you choose to give the money back.
 
 Metrics and alerts: `razorpay_webhook_events_total{result}`, `payment_verifications_total{outcome}`, `payment_refunds_total{result}`; the `refund_failed` alert fires when a refund does not go through. See `OBSERVABILITY.md` and `prometheus-alerts.yml`.
 
@@ -116,4 +117,4 @@ Metrics and alerts: `razorpay_webhook_events_total{result}`, `payment_verificati
 
 ## Not covered yet
 
-GST tax invoices (they need the business's GSTIN, invoice numbering and the buyer's billing details; the receipt email is not one), partial refunds, and automatic plan changes when a refund is made in the dashboard.
+GST tax invoices (they need the business's GSTIN, invoice numbering and the buyer's billing details; the receipt email is not one) and partial refunds.

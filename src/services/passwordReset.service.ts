@@ -67,9 +67,10 @@ export async function requestPasswordReset(role: ResetRole, email: string): Prom
 }
 
 /** Sets a new password from a reset token. Returns false for an unknown, used or expired token. */
-export async function resetPassword(role: ResetRole, token: string, newPassword: string): Promise<boolean> {
+/** Returns the id of the account whose password was set, or null when the link is not valid. */
+export async function resetPassword(role: ResetRole, token: string, newPassword: string): Promise<string | null> {
   const row = await prisma.passwordResetToken.findUnique({ where: { tokenHash: hashToken(token) } });
-  if (!row || row.role !== role || row.usedAt !== null || row.expiresAt.getTime() <= Date.now()) return false;
+  if (!row || row.role !== role || row.usedAt !== null || row.expiresAt.getTime() <= Date.now()) return null;
 
   const passwordHash = await hashPassword(newPassword);
   const consumed = await prisma.$transaction(async (tx) => {
@@ -82,8 +83,9 @@ export async function resetPassword(role: ResetRole, token: string, newPassword:
     await tx.passwordResetToken.deleteMany({ where: { role, accountId: row.accountId, id: { not: row.id } } });
     return true;
   });
-  if (consumed) forgetSession(SESSION_ROLE[role], row.accountId);
-  return consumed;
+  if (!consumed) return null;
+  forgetSession(SESSION_ROLE[role], row.accountId);
+  return row.accountId;
 }
 
 export type ChangePasswordResult =

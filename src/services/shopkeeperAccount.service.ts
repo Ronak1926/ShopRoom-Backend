@@ -32,6 +32,7 @@ export async function deleteShopkeeperAccount(shopkeeperId: string): Promise<voi
   await prisma.$transaction([
     prisma.notificationSchedule.deleteMany({ where: { shopkeeperId } }),
     prisma.passwordResetToken.deleteMany({ where: { role: "SHOPKEEPER", accountId: shopkeeperId } }),
+    prisma.securityEvent.deleteMany({ where: { actorRole: "SHOPKEEPER", actorId: shopkeeperId } }),
     prisma.notificationSend.deleteMany({ where: { shopkeeperId } }),
     prisma.shopkeeper.delete({ where: { id: shopkeeperId } }),
   ]);

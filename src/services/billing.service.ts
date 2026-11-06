@@ -20,7 +20,7 @@ export interface BillingView {
   /** Whole days left, 0 when expired. */
   daysLeft: number;
   plans: { id: PlanId; label: string; priceInr: number; days: number }[];
-  payments: { id: string; purpose: "REGISTRATION" | "RENEWAL"; planType: string; amountInr: number; paidAt: string }[];
+  payments: { id: string; purpose: "REGISTRATION" | "RENEWAL"; planType: string; amountInr: number; paidAt: string; refunded: boolean }[];
 }
 
 export function isPlanActive(planExpiresAt: Date, now = new Date()): boolean {
@@ -40,7 +40,7 @@ export async function getBilling(shopkeeperId: string): Promise<BillingView> {
       where: { shopkeeperId },
       orderBy: { createdAt: "desc" },
       take: 50,
-      select: { id: true, purpose: true, planType: true, amount: true, createdAt: true },
+      select: { id: true, purpose: true, planType: true, amount: true, createdAt: true, refundedAt: true },
     }),
   ]);
   const now = new Date();
@@ -57,6 +57,7 @@ export async function getBilling(shopkeeperId: string): Promise<BillingView> {
       planType: p.planType,
       amountInr: p.amount / 100,
       paidAt: p.createdAt.toISOString(),
+      refunded: p.refundedAt !== null,
     })),
   };
 }

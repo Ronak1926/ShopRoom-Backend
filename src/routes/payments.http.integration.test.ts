@@ -596,6 +596,106 @@ describe("payments end to end", { skip: !enabled }, () => {
     });
   });
 
+  // ── refunds made in the Razorpay dashboard ─────────────────────────────────
+
+  describe("a refund made in the Razorpay dashboard", () => {
+    const refundEvent = (o: { paymentId: string; refundId?: string; amount: number; amountRefunded?: number }) =>
+      JSON.stringify({
+        event: "refund.processed",
+        payload: {
+          refund: { entity: { id: o.refundId ?? "rfnd_Dash1", payment_id: o.paymentId, amount: o.amount, status: "processed" } },
+          payment: { entity: { id: o.paymentId, amount_refunded: o.amountRefunded ?? o.amount } },
+        },
+      });
+
+    async function paidRenewal(plan: "1m" | "2m" = "2m", daysLeft = 10) {
+      const made = await createShop(t.prisma, { planType: "1m" });
+      await t.prisma.shopkeeper.update({ where: { id: made.shopkeeperId }, data: { planExpiresAt: new Date(Date.now() + daysLeft * DAY_MS) } });
+      const token = t.shopkeeperToken(made.shopkeeperId);
+      const placed = (await t.call("POST", "/api/shopkeeper/billing/order", { token, body: { planType: plan } })).json.data as { orderId: string; amount: number };
+      const paymentId = `pay_Df${(counter += 1)}`;
+      const res = await t.call("POST", "/api/shopkeeper/billing/verify", {
+        token,
+        body: { razorpayOrderId: placed.orderId, razorpayPaymentId: paymentId, razorpaySignature: hmac(KEY_SECRET, `${placed.orderId}|${paymentId}`) },
+      });
+      assert.equal(res.status, 200, JSON.stringify(res.json));
+      return { ...made, token, paymentId, orderId: placed.orderId, amount: placed.amount };
+    }
+    const planEnd = async (shopkeeperId: string) => (await t.prisma.shopkeeper.findUniqueOrThrow({ where: { id: shopkeeperId } })).planExpiresAt.getTime();
+
+    it("takes back the days the payment bought, marks it refunded, and says so in the billing history", async () => {
+      const s = await paidRenewal("2m", 10);
+      assert.ok(Math.abs((await planEnd(s.shopkeeperId)) - (Date.now() + 70 * DAY_MS)) < 60_000);
+
+      const res = await webhook(refundEvent({ paymentId: s.paymentId, amount: s.amount }));
+      assert.equal(res.status, 200);
+
+      assert.ok(Math.abs((await planEnd(s.shopkeeperId)) - (Date.now() + 10 * DAY_MS)) < 60_000, "back to what it was before the purchase");
+      const row = await order(s.orderId);
+      assert.deepEqual([row.status, row.razorpayRefundId], ["REFUNDED", "rfnd_Dash1"]);
+      assert.ok((await t.prisma.planPayment.findUniqueOrThrow({ where: { razorpayPaymentId: s.paymentId } })).refundedAt);
+
+      const billing = await t.call("GET", "/api/shopkeeper/billing", { token: s.token });
+      assert.equal(billing.json.data.payments[0].refunded, true);
+    });
+
+    it("does nothing the second time Razorpay tells us", async () => {
+      const s = await paidRenewal("1m", 10);
+      await webhook(refundEvent({ paymentId: s.paymentId, amount: s.amount }));
+      const after = await planEnd(s.shopkeeperId);
+      assert.equal((await webhook(refundEvent({ paymentId: s.paymentId, amount: s.amount }))).status, 200);
+      assert.equal(await planEnd(s.shopkeeperId), after, "the days are taken back once");
+    });
+
+    it("leaves a partial refund to a person, and treats two part-refunds that add up to the whole as a full one", async () => {
+      const s = await paidRenewal("1m", 10);
+      const half = Math.floor(s.amount / 2);
+      const before = await planEnd(s.shopkeeperId);
+
+      await webhook(refundEvent({ paymentId: s.paymentId, refundId: "rfnd_P1", amount: half }));
+      assert.equal(await planEnd(s.shopkeeperId), before, "half back: the plan stays");
+      assert.equal((await order(s.orderId)).status, "FULFILLED");
+
+      await webhook(refundEvent({ paymentId: s.paymentId, refundId: "rfnd_P2", amount: s.amount - half, amountRefunded: s.amount }));
+      assert.equal((await order(s.orderId)).status, "REFUNDED", "the rest arrived: now it is a full refund");
+      assert.ok(Math.abs((await planEnd(s.shopkeeperId)) - (before - 30 * DAY_MS)) < 1000);
+    });
+
+    it("lets a new shop's plan run out when its sign-up payment is refunded, without deleting the account", async () => {
+      const o = await orderFor("1m");
+      assert.equal((await confirm(o.draftId, o.orderId, "pay_DfReg1")).status, 200);
+      const shopkeeper = await t.prisma.shopkeeper.findUniqueOrThrow({ where: { email: o.email } });
+      assert.ok((await planEnd(shopkeeper.id)) > Date.now() + 25 * DAY_MS);
+
+      await webhook(refundEvent({ paymentId: "pay_DfReg1", amount: o.amount }));
+      assert.ok((await planEnd(shopkeeper.id)) <= Date.now() + 1000, "no paid time left");
+      assert.equal(await t.prisma.shopkeeper.count({ where: { id: shopkeeper.id } }), 1, "the account itself stays");
+    });
+
+    it("ignores refunds for payments that are not ours, and ones we made ourselves", async () => {
+      assert.equal((await webhook(refundEvent({ paymentId: "pay_NotOurs1", amount: 100 }))).status, 200);
+
+      const taken = await orderFor("1m");
+      await t.prisma.shopkeeper.create({
+        data: { email: taken.email, passwordHash: "x", shopName: "Other", shopCategory: "x", address: "x", city: "x", state: "x", pincode: "400001", phoneNumber: uniquePhone(), planType: "1m", planExpiresAt: new Date() },
+      });
+      await webhook(paidEvent({ orderId: taken.orderId, paymentId: "pay_DfOwn1", amount: taken.amount }));
+      const ours = await order(taken.orderId);
+      assert.equal(ours.status, "REFUNDED");
+      const ourRefundId = ours.razorpayRefundId;
+
+      // Razorpay now reports that refund too. It must not be mistaken for a dashboard one.
+      assert.equal((await webhook(refundEvent({ paymentId: "pay_DfOwn1", refundId: ourRefundId ?? "rfnd_x", amount: taken.amount }))).status, 200);
+      const after = await order(taken.orderId);
+      assert.deepEqual([after.status, after.razorpayRefundId, after.failureReason], [ours.status, ours.razorpayRefundId, ours.failureReason]);
+    });
+
+    it("ignores a malformed refund event instead of failing", async () => {
+      const body = JSON.stringify({ event: "refund.processed", payload: { refund: { entity: { id: "nope", amount: "ten" } } } });
+      assert.equal((await webhook(body)).status, 200);
+    });
+  });
+
   // ── receipts ───────────────────────────────────────────────────────────────
 
   describe("payment receipts", () => {

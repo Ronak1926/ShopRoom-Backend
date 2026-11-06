@@ -1,7 +1,8 @@
 import type { Request, Response } from "express";
 import z from "zod";
 import { parseBody } from "../utils/validate.js";
-import { signCustomerToken } from "../utils/jwt.js";
+import { signCustomerToken, signMfaPendingToken } from "../utils/jwt.js";
+import { isMfaEnabled } from "../services/mfa.service.js";
 import {
   deleteCustomerAccount,
   getCustomerById,
@@ -184,6 +185,9 @@ export async function loginCustomerHandler(req: Request, res: Response) {
     return res.status(401).json({ message: "Invalid email or password" });
   }
 
+  if (await isMfaEnabled("CUSTOMER", result.customer.id)) {
+    return res.json({ mfaRequired: true, mfaToken: signMfaPendingToken("CUSTOMER", result.customer.id, result.tokenVersion) });
+  }
   recordSecurityEvent(req, { type: "LOGIN_SUCCESS", role: "CUSTOMER", actorId: result.customer.id, detail: { method: "password" } });
   const token = signCustomerToken(result.customer.id, result.tokenVersion);
   return res.json({
@@ -217,6 +221,9 @@ export async function googleAuthCustomerHandler(req: Request, res: Response) {
     fullName: name ?? email.split("@")[0],
   });
 
+  if (await isMfaEnabled("CUSTOMER", result.customer.id)) {
+    return res.json({ mfaRequired: true, mfaToken: signMfaPendingToken("CUSTOMER", result.customer.id, result.tokenVersion) });
+  }
   recordSecurityEvent(req, { type: "LOGIN_SUCCESS", role: "CUSTOMER", actorId: result.customer.id, detail: { method: "google" } });
   const token = signCustomerToken(result.customer.id, result.tokenVersion);
   return res.json({ token, customer: result.customer });

@@ -6,8 +6,8 @@ The server refuses to start with `NODE_ENV=production` unless the secrets marked
 
 | Secret | Required | Where to rotate | Notes |
 | --- | --- | --- | --- |
-| `JWT_SECRET` (≥ 32 chars) | yes | `openssl rand -base64 48` | Zero-downtime: set `JWT_SECRET` to the new value and `JWT_SECRET_PREVIOUS` to the old; deploy; after 7 days remove `JWT_SECRET_PREVIOUS`. Before rotating, copy the current value into `MESSAGE_ENCRYPTION_KEY`, otherwise stored chat history can no longer be decrypted. |
-| `MESSAGE_ENCRYPTION_KEY` | no | same | Keep stable once set; changing it makes existing messages unreadable. |
+| `JWT_SECRET` (≥ 32 chars) | yes | `openssl rand -base64 48` | Zero-downtime: set `JWT_SECRET` to the new value and `JWT_SECRET_PREVIOUS` to the old; deploy; after 7 days remove `JWT_SECRET_PREVIOUS`. Before rotating, copy the current value into `MESSAGE_ENCRYPTION_KEY`, otherwise stored chat history **and every account's two-step verification secret** can no longer be decrypted (people with two-step verification on would be locked out and need their recovery codes). |
+| `MESSAGE_ENCRYPTION_KEY` | no | same | Keep stable once set; changing it makes existing messages and two-step verification secrets unreadable. |
 | `DATABASE_URL` | yes | database provider | Use a least-privilege role (no superuser, no DDL at runtime) and TLS. |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | yes | Razorpay dashboard → API keys | Live keys only in production. |
 | `RAZORPAY_WEBHOOK_SECRET` | yes | Razorpay dashboard → Webhooks | Not the API key secret. Webhooks are rejected while unset. To rotate, change it in the dashboard and in the environment together; deliveries in the gap fail their signature and are retried by Razorpay for about a day, so nothing is lost. Use a different secret per environment. |

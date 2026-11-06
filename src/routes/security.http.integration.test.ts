@@ -45,6 +45,9 @@ const PUBLIC_ROUTES = new Set([
   "POST /api/public/newsletter",
   // authenticated by the signed token in the emailed link (an HMAC of the address); rate limited
   "POST /api/public/newsletter/unsubscribe",
+  // second step of signing in: authenticated by the short-lived token from the password step; throttled per account
+  "POST /api/customers/login/mfa",
+  "POST /api/shopkeeper/login/mfa",
   // monitors and error intake: no user data, bounded and rate limited
   "GET /healthz",
   "GET /readyz",

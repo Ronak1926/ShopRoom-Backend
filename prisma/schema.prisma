@@ -153,6 +153,35 @@ model SecurityEvent {
   @@index([createdAt])
 }
 
+/// An authenticator-app credential. enabledAt is null while setup is pending (the secret has been
+/// shown but the person has not yet proved their app works). One per account.
+model MfaCredential {
+  id           String      @id @default(cuid())
+  role         AccountRole
+  accountId    String
+  /// The base32 secret, encrypted at rest.
+  secretEnc    String
+  enabledAt    DateTime?
+  /// Newest time step already accepted, so a code cannot be used twice.
+  lastUsedStep Int?
+  createdAt    DateTime    @default(now())
+
+  recoveryCodes MfaRecoveryCode[]
+
+  @@unique([role, accountId])
+}
+
+/// One-time codes for a lost phone. Only the SHA-256 of each is stored.
+model MfaRecoveryCode {
+  id           String        @id @default(cuid())
+  credentialId String
+  credential   MfaCredential @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+  codeHash     String
+  usedAt       DateTime?
+
+  @@unique([credentialId, codeHash])
+}
+
 model PasswordResetToken {
   id        String      @id @default(cuid())
   role      AccountRole

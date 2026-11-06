@@ -19,6 +19,7 @@ import {
 import { createPaymentOrder, handleWebhook, verifyPayment } from "../controllers/payment.controller.js";
 import { exportShopkeeperDataHandler } from "../controllers/dataExport.controller.js";
 import { listShopkeeperSecurityEventsHandler } from "../controllers/securityEvents.controller.js";
+import { mfaHandlers } from "../controllers/mfa.controller.js";
 import { requireShopkeeperAuth } from "../middleware/shopkeeperAuth.js";
 import {
   changePasswordHandler,
@@ -29,6 +30,9 @@ import { createRenewalOrderHandler, getBillingHandler, verifyRenewalHandler } fr
 import {
   accountDeletionLimiter,
   dataExportLimiter,
+  mfaLoginAccountLimiter,
+  mfaLoginIpLimiter,
+  mfaManageLimiter,
   changePasswordLimiter,
   draftInitAccountLimiter,
   draftLimiter,
@@ -104,6 +108,13 @@ shopkeeperRouter.post("/billing/verify", requireShopkeeperAuth, paymentLimiter, 
 shopkeeperRouter.post("/logout-all", requireShopkeeperAuth, logoutAllShopkeeperHandler);
 shopkeeperRouter.post("/me/export", requireShopkeeperAuth, dataExportLimiter, exportShopkeeperDataHandler);
 shopkeeperRouter.get("/me/security-events", requireShopkeeperAuth, listShopkeeperSecurityEventsHandler);
+const shopkeeperMfa = mfaHandlers("SHOPKEEPER");
+shopkeeperRouter.get("/me/mfa", requireShopkeeperAuth, shopkeeperMfa.status);
+shopkeeperRouter.post("/me/mfa/setup", requireShopkeeperAuth, mfaManageLimiter, shopkeeperMfa.setup);
+shopkeeperRouter.post("/me/mfa/enable", requireShopkeeperAuth, mfaManageLimiter, shopkeeperMfa.enable);
+shopkeeperRouter.post("/me/mfa/disable", requireShopkeeperAuth, mfaManageLimiter, shopkeeperMfa.disable);
+shopkeeperRouter.post("/me/mfa/recovery-codes", requireShopkeeperAuth, mfaManageLimiter, shopkeeperMfa.recoveryCodes);
+shopkeeperRouter.post("/login/mfa", mfaLoginIpLimiter, mfaLoginAccountLimiter, shopkeeperMfa.completeLogin);
 shopkeeperRouter.delete(
   "/me",
   requireShopkeeperAuth,

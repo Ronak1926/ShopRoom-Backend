@@ -10,7 +10,7 @@ import {
 import { uploadLogoToCloudinary } from "../lib/cloudinary.js";
 import { validatePhoneNumber } from "../lib/phoneValidation.js";
 import { VerifyError } from "../lib/twilioVerify.js";
-import { signShopkeeperToken } from "../utils/jwt.js";
+import { signMfaPendingToken, signShopkeeperToken } from "../utils/jwt.js";
 import { prisma } from "../database/prisma.js";
 import { imageDataUriSchema } from "../schemas/imageUpload.schema.js";
 import { newPasswordSchema, needsRehash, hashPassword, verifyPassword } from "../utils/password.js";
@@ -22,6 +22,7 @@ import { deleteShopkeeperAccount } from "../services/shopkeeperAccount.service.j
 import { disconnectViewer } from "../realtime/socket.js";
 import { logger } from "../lib/logger.js";
 import { recordSecurityEvent } from "../services/securityEvent.service.js";
+import { isMfaEnabled } from "../services/mfa.service.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -300,7 +301,6 @@ export async function loginShopkeeper(
       res.status(401).json({ message: "Invalid email or password" });
       return;
     }
-    recordSecurityEvent(req, { type: "LOGIN_SUCCESS", role: "SHOPKEEPER", actorId: shopkeeper.id, detail: { method: "password" } });
     if (needsRehash(shopkeeper.passwordHash)) {
       // Best effort: failing to upgrade the hash must not fail the login.
       await hashPassword(parsed.data.password)
@@ -309,6 +309,11 @@ export async function loginShopkeeper(
         )
         .catch(() => undefined);
     }
+    if (await isMfaEnabled("SHOPKEEPER", shopkeeper.id)) {
+      res.json({ mfaRequired: true, mfaToken: signMfaPendingToken("SHOPKEEPER", shopkeeper.id, shopkeeper.tokenVersion) });
+      return;
+    }
+    recordSecurityEvent(req, { type: "LOGIN_SUCCESS", role: "SHOPKEEPER", actorId: shopkeeper.id, detail: { method: "password" } });
     res.json({
       token: signShopkeeperToken(shopkeeper.id, shopkeeper.tokenVersion),
       shopkeeperId: shopkeeper.id,

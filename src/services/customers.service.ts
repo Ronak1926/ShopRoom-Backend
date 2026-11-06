@@ -304,6 +304,7 @@ export async function deleteCustomerAccount(customerId: string): Promise<string[
     }
     await tx.passwordResetToken.deleteMany({ where: { role: "CUSTOMER", accountId: customerId } });
     await tx.securityEvent.deleteMany({ where: { actorRole: "CUSTOMER", actorId: customerId } });
+    await tx.mfaCredential.deleteMany({ where: { role: "CUSTOMER", accountId: customerId } });
     await tx.customer.delete({ where: { id: customerId } });
     return ids;
   });

@@ -17,6 +17,7 @@ import {
 } from "../controllers/customerDevice.controller.js";
 import { exportCustomerDataHandler } from "../controllers/dataExport.controller.js";
 import { listCustomerSecurityEventsHandler } from "../controllers/securityEvents.controller.js";
+import { mfaHandlers } from "../controllers/mfa.controller.js";
 import { requireCustomerAuth } from "../middleware/customerAuth.js";
 import {
   changePasswordHandler,
@@ -26,6 +27,9 @@ import {
 import {
   accountDeletionLimiter,
   dataExportLimiter,
+  mfaLoginAccountLimiter,
+  mfaLoginIpLimiter,
+  mfaManageLimiter,
   changePasswordLimiter,
   forgotPasswordAccountLimiter,
   forgotPasswordIpLimiter,
@@ -55,6 +59,13 @@ customersRouter.delete("/me", requireCustomerAuth, accountDeletionLimiter, delet
 customersRouter.post("/me/logout-all", requireCustomerAuth, logoutAllHandler);
 customersRouter.post("/me/export", requireCustomerAuth, dataExportLimiter, exportCustomerDataHandler);
 customersRouter.get("/me/security-events", requireCustomerAuth, listCustomerSecurityEventsHandler);
+const customerMfa = mfaHandlers("CUSTOMER");
+customersRouter.get("/me/mfa", requireCustomerAuth, customerMfa.status);
+customersRouter.post("/me/mfa/setup", requireCustomerAuth, mfaManageLimiter, customerMfa.setup);
+customersRouter.post("/me/mfa/enable", requireCustomerAuth, mfaManageLimiter, customerMfa.enable);
+customersRouter.post("/me/mfa/disable", requireCustomerAuth, mfaManageLimiter, customerMfa.disable);
+customersRouter.post("/me/mfa/recovery-codes", requireCustomerAuth, mfaManageLimiter, customerMfa.recoveryCodes);
+customersRouter.post("/login/mfa", mfaLoginIpLimiter, mfaLoginAccountLimiter, customerMfa.completeLogin);
 customersRouter.get("/me/rooms", requireCustomerAuth, meRoomsHandler);
 customersRouter.put("/me/location", requireCustomerAuth, locationLimiter, reportLocationHandler);
 customersRouter.post("/me/devices", requireCustomerAuth, registerDeviceHandler);

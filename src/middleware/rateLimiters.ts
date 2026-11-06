@@ -82,6 +82,25 @@ export const loginAccountLimiter = limiter(
   (req) => `acct:${bodyField(req, "email")}|${clientIp(req)}`,
 );
 
+/** The account named by the (signed) token in a second-step request; falls back to the client address. */
+function pendingAccount(req: Request): string {
+  const token = (req.body as Record<string, unknown> | undefined)?.mfaToken;
+  if (typeof token === "string") {
+    try {
+      const sub = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8")).sub;
+      if (typeof sub === "string") return sub.slice(0, 64);
+    } catch {
+      // Not a token: the handler will refuse it; the limiter still counts it against the address.
+    }
+  }
+  return clientIp(req);
+}
+const MFA_MESSAGE = "Too many attempts. Please wait a few minutes and try again.";
+export const mfaLoginIpLimiter = limiter("mfa-login-ip", 15 * MINUTE, 40, MFA_MESSAGE);
+/** Per account, from any address: a six-digit code must not be guessable by spreading attempts over many clients. */
+export const mfaLoginAccountLimiter = limiter("mfa-login-account", 15 * MINUTE, 8, MFA_MESSAGE, (req) => `mfa:${pendingAccount(req)}`);
+export const mfaManageLimiter = limiter("mfa-manage", 60 * MINUTE, 20, MFA_MESSAGE, (req) => `mfa-manage:${req.customerId ?? req.shopkeeperId ?? clientIp(req)}`);
+
 export const registerLimiter = limiter(
   "register",
   60 * MINUTE,

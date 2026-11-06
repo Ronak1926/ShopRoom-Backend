@@ -6,6 +6,7 @@
  * customerToken        — 7-day session token for customers.
  * phoneVerifiedToken   — 15-min short-lived token proving phone OTP passed for a draft.
  * shopkeeperToken      — 7-day session token for shopkeepers.
+ * mfaPendingToken      — 5-min token proving the password step passed, redeemable only for the second step.
  *
  * HARDENING
  * ──────────
@@ -26,7 +27,7 @@ import jwt from "jsonwebtoken";
 const ALGORITHM = "HS256";
 const ISSUER = "shoproom";
 
-type Audience = "customer" | "shopkeeper" | "phone_verified";
+type Audience = "customer" | "shopkeeper" | "phone_verified" | "mfa_pending";
 
 function signingSecret(): string {
   const secret = process.env.JWT_SECRET;
@@ -106,6 +107,36 @@ export function verifyPhoneVerifiedToken(token: string): PhoneVerifiedPayload {
     throw new Error("Invalid phone verification token");
   }
   return payload as PhoneVerifiedPayload;
+}
+
+// ── Two-step verification: between the password and the code ──────────────────
+
+export interface MfaPendingPayload {
+  sub: string;
+  type: "mfa_pending";
+  role: "CUSTOMER" | "SHOPKEEPER";
+  /** The account's tokenVersion when the password was accepted; a password change in between voids this token. */
+  tv: number;
+}
+
+export function signMfaPendingToken(role: MfaPendingPayload["role"], accountId: string, tokenVersion: number): string {
+  const payload: MfaPendingPayload = { sub: accountId, type: "mfa_pending", role, tv: tokenVersion };
+  return sign(payload, "mfa_pending", "5m");
+}
+
+export function verifyMfaPendingToken(token: string): MfaPendingPayload {
+  const payload = verify(token, "mfa_pending") as Partial<MfaPendingPayload> | string;
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    payload.type !== "mfa_pending" ||
+    typeof payload.sub !== "string" ||
+    typeof payload.tv !== "number" ||
+    (payload.role !== "CUSTOMER" && payload.role !== "SHOPKEEPER")
+  ) {
+    throw new Error("Invalid two-step token");
+  }
+  return payload as MfaPendingPayload;
 }
 
 // ── Shopkeeper ────────────────────────────────────────────────────────────────

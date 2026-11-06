@@ -45,8 +45,9 @@ None of them is rate limited. Set up the uptime monitor against `https://<api-ho
 | `notification_device_results_total` | result (success, failure) | per-device push success |
 | `fcm_tokens_invalidated_total` | | how many dead tokens FCM reports |
 | `scheduler_runs_total` | result (sent, missed, limit_reached) | scheduled-send health |
-| `payment_verifications_total` | outcome (success, failure) | payment success rate |
-| `razorpay_webhook_events_total` | result (captured, payment_failed, invalid_signature, invalid_body, ignored) | webhook health |
+| `payment_verifications_total` | outcome (success, failure, refunded, refund_pending) | payment success rate |
+| `payment_refunds_total` | result (refunded, failed) | payments that could not be honoured, and whether the refund went through |
+| `razorpay_webhook_events_total` | result (fulfilled, duplicate, refunded, refund_pending, unknown_order, mismatch, payment_failed, ignored, invalid_signature, invalid_body, error) | webhook health |
 | `client_errors_total` | kind | front-end error volume |
 | `alerts_fired_total` | kind | how often the built-in alerts fire |
 | `process_uptime_seconds`, `process_resident_memory_bytes` | | restarts, memory |

@@ -5,26 +5,22 @@ import {
   updateShopkeeperDraft,
   sendPhoneOtp,
   verifyPhoneOtp,
-  createOrder,
-  verifyPaymentAndRegister,
   assertDraftActive,
 } from "../services/shopkeeper.service.js";
 import { uploadLogoToCloudinary } from "../lib/cloudinary.js";
 import { validatePhoneNumber } from "../lib/phoneValidation.js";
 import { VerifyError } from "../lib/twilioVerify.js";
-import { verifyWebhookSignature } from "../lib/razorpay.js";
 import { signShopkeeperToken } from "../utils/jwt.js";
 import { prisma } from "../database/prisma.js";
 import { imageDataUriSchema } from "../schemas/imageUpload.schema.js";
 import { newPasswordSchema, needsRehash, hashPassword, verifyPassword } from "../utils/password.js";
 import { RegistrationError } from "../utils/registrationError.js";
 import { NotificationError } from "../utils/notificationError.js";
+import { PaymentError } from "../utils/paymentError.js";
 import { revokeSessions } from "../services/session.service.js";
 import { deleteShopkeeperAccount } from "../services/shopkeeperAccount.service.js";
 import { disconnectViewer } from "../realtime/socket.js";
 import { logger } from "../lib/logger.js";
-import { paymentVerifications, razorpayWebhooks } from "../lib/metrics.js";
-import { recordPaymentFailure, recordWebhookFailure } from "../services/alerting.service.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -41,7 +37,8 @@ export function safeMessage(
   if (
     err instanceof RegistrationError ||
     err instanceof VerifyError ||
-    err instanceof NotificationError
+    err instanceof NotificationError ||
+    err instanceof PaymentError
   ) {
     return err.message;
   }
@@ -99,19 +96,6 @@ const sendOtpSchema = z.object({
 const verifyOtpSchema = z.object({
   draftId: draftIdSchema,
   code: z.string().length(6),
-});
-
-const createOrderSchema = z.object({
-  draftId: draftIdSchema,
-  planType: z.enum(["1m", "2m", "3m"]),
-});
-
-const verifyPaymentSchema = z.object({
-  draftId: draftIdSchema,
-  planType: z.enum(["1m", "2m", "3m"]),
-  razorpayOrderId: z.string().min(1).max(64),
-  razorpayPaymentId: z.string().min(1).max(64),
-  razorpaySignature: z.string().min(1).max(256),
 });
 
 const uploadLogoSchema = z.object({
@@ -270,126 +254,6 @@ export async function verifyPhoneOtpHandler(
         message: safeMessage(err, "Verification failed. Please try again."),
       });
   }
-}
-
-export async function createPaymentOrder(
-  req: Request,
-  res: Response,
-): Promise<void> {
-  const parsed = createOrderSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ message: "Invalid request" });
-    return;
-  }
-  try {
-    const result = await createOrder(parsed.data.draftId, parsed.data.planType);
-    res.json(result);
-  } catch (err) {
-    logger.error("Create order", err);
-    res
-      .status(400)
-      .json({
-        message: safeMessage(err, "Failed to create order. Please try again."),
-      });
-  }
-}
-
-export async function verifyPayment(
-  req: Request,
-  res: Response,
-): Promise<void> {
-  const parsed = verifyPaymentSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ message: "Invalid request" });
-    return;
-  }
-  try {
-    const registration = await verifyPaymentAndRegister(
-      parsed.data.draftId,
-      parsed.data.razorpayOrderId,
-      parsed.data.razorpayPaymentId,
-      parsed.data.razorpaySignature,
-      parsed.data.planType,
-    );
-    paymentVerifications.inc({ outcome: "success" });
-    res.json({
-      message: "Payment verified. Registration complete.",
-      token: signShopkeeperToken(registration.shopkeeperId, 0),
-      shopkeeperId: registration.shopkeeperId,
-      shopId: registration.shopId,
-      roomId: registration.roomId,
-      inviteCode: registration.inviteCode,
-      inviteLink: registration.inviteLink,
-    });
-  } catch (err) {
-    paymentVerifications.inc({ outcome: "failure" });
-    recordPaymentFailure();
-    logger.error("Payment verify", err);
-    res
-      .status(err instanceof RegistrationError ? err.status : 500)
-      .json({
-        message: safeMessage(
-          err,
-          "Payment verification failed. Please try again.",
-        ),
-      });
-  }
-}
-
-export async function handleWebhook(
-  req: Request,
-  res: Response,
-): Promise<void> {
-  const signature = req.headers["x-razorpay-signature"];
-  const rawBody = (req as Request & { rawBody?: string }).rawBody;
-
-  if (typeof signature !== "string" || !rawBody) {
-    res.status(400).json({ message: "Missing signature or body" });
-    return;
-  }
-
-  if (!verifyWebhookSignature(rawBody, signature)) {
-    logger.warn("Razorpay webhook rejected: invalid signature");
-    razorpayWebhooks.inc({ result: "invalid_signature" });
-    recordWebhookFailure();
-    res.status(401).json({ message: "Invalid webhook signature" });
-    return;
-  }
-
-  let event: {
-    event: string;
-    payload: {
-      payment?: {
-        entity?: { id?: string; amount?: number; error_description?: string };
-      };
-    };
-  };
-  try {
-    event = JSON.parse(rawBody);
-  } catch {
-    razorpayWebhooks.inc({ result: "invalid_body" });
-    res.status(400).json({ message: "Invalid JSON body" });
-    return;
-  }
-
-  const eventType = event?.event;
-  const payment = event?.payload?.payment?.entity;
-
-  switch (eventType) {
-    case "payment.captured":
-      razorpayWebhooks.inc({ result: "captured" });
-      logger.info("Razorpay payment captured", { paymentId: payment?.id, amountInr: (payment?.amount ?? 0) / 100 });
-      break;
-    case "payment.failed":
-      razorpayWebhooks.inc({ result: "payment_failed" });
-      logger.warn("Razorpay payment failed", { paymentId: payment?.id, reason: payment?.error_description });
-      break;
-    default:
-      razorpayWebhooks.inc({ result: "ignored" });
-      logger.info("Razorpay webhook ignored", { eventType });
-  }
-
-  res.json({ received: true });
 }
 
 export async function uploadLogo(req: Request, res: Response): Promise<void> {

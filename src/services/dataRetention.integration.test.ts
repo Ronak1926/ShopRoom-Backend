@@ -129,6 +129,7 @@ describe("data retention", { skip: !enabled }, () => {
   it("is a no-op on a clean database", async () => {
     assert.deepEqual(await retention.purgeExpiredData(), {
       resetTokens: 0,
+      paymentOrders: 0,
       rateLimitCounters: 0,
       emailOtps: 0,
       stalePositions: 0,

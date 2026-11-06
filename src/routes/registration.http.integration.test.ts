@@ -197,18 +197,10 @@ describe("shopkeeper registration and payments", { skip: !enabled }, () => {
       assert.equal(replay.status, 409);
       assert.equal(await t.prisma.shopkeeper.count(), 1);
 
-      const replayOrder = await pay(a, a.orderId, "pay_other");
-      assert.equal(replayOrder.status, 400, "the draft is consumed once registration completes");
-    });
-
-    it("checks the paid amount against the plan price", async () => {
-      const { assertOrderMatchesPlan, receiptFor } = await import("../services/shopkeeper.service.js");
-      const receipt = receiptFor("cl_example_draft_id");
-      assert.doesNotThrow(() => assertOrderMatchesPlan({ amount: 89900, receipt }, "cl_example_draft_id", "3m"));
-      assert.doesNotThrow(() => assertOrderMatchesPlan({ amount: null, receipt }, "cl_example_draft_id", "1m"));
-      assert.throws(() => assertOrderMatchesPlan({ amount: 39900, receipt }, "cl_example_draft_id", "3m"), /amount/);
-      assert.throws(() => assertOrderMatchesPlan({ amount: 89900, receipt: "sk_other" }, "cl_example_draft_id", "3m"), /does not belong/);
-      assert.throws(() => assertOrderMatchesPlan({ amount: 89900, receipt: null }, "cl_example_draft_id", "3m"), /does not belong/);
+      // A different payment against an order that already bought the account has nothing to buy: it is sent back.
+      const second = await pay(a, a.orderId, "pay_other");
+      assert.equal(second.status, 200, "the account is unchanged and the person can carry on");
+      assert.equal(await t.prisma.shopkeeper.count(), 1);
     });
   });
 
@@ -228,8 +220,8 @@ describe("shopkeeper registration and payments", { skip: !enabled }, () => {
       const razorpay = await import("../lib/razorpay.js");
       await inProduction(async () => {
         assert.equal(razorpay.verifyPaymentSignature("order_x", "pay_x", "sig"), false);
-        await assert.rejects(razorpay.createRazorpayOrder(39900, "sk_x"), /not configured/);
-        await assert.rejects(razorpay.fetchOrderSummary("order_x"), /not configured/);
+        await assert.rejects(razorpay.createRazorpayOrder({ amount: 39900, receipt: "po_x" }), /not configured/);
+        await assert.rejects(razorpay.refundPayment("pay_x", 39900), /not configured/);
       });
     });
 

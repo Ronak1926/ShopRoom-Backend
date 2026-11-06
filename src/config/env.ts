@@ -41,7 +41,21 @@ export function productionConfigProblems(env: Env = process.env): string[] {
   for (const name of REQUIRED_IN_PRODUCTION) {
     if (!env[name]?.trim()) problems.push(name);
   }
+  // A typo here would only show up when the first customer tries to pay.
+  const razorpayKeyId = env.RAZORPAY_KEY_ID?.trim();
+  if (razorpayKeyId && !RAZORPAY_KEY_ID_PATTERN.test(razorpayKeyId)) problems.push("RAZORPAY_KEY_ID (must look like rzp_live_… or rzp_test_…)");
   return problems;
+}
+
+const RAZORPAY_KEY_ID_PATTERN = /^rzp_(live|test)_[A-Za-z0-9]{6,}$/;
+
+/** Settings that work but are probably a mistake. The server still starts; the log says why it should not. */
+export function productionConfigWarnings(env: Env = process.env): string[] {
+  const warnings: string[] = [];
+  if (isProduction(env) && env.RAZORPAY_KEY_ID?.trim().startsWith("rzp_test_")) {
+    warnings.push("RAZORPAY_KEY_ID is a TEST key: payments will succeed without any real money moving. Use a rzp_live_ key for real customers.");
+  }
+  return warnings;
 }
 
 export function assertProductionConfig(env: Env = process.env): void {

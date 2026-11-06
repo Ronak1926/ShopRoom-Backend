@@ -2,7 +2,7 @@ import "dotenv/config";
 
 import { createServer } from "http";
 
-import { assertProductionConfig } from "./config/env.js";
+import { assertProductionConfig, productionConfigWarnings } from "./config/env.js";
 import { app } from "./app.js";
 import { connectDatabase } from "./database/prisma.js";
 import { cleanupExpiredDrafts } from "./services/shopkeeper.service.js";
@@ -13,6 +13,7 @@ import { logger } from "./lib/logger.js";
 
 // Refuse to run in production with missing or weak secrets (see config/env.ts).
 assertProductionConfig();
+for (const warning of productionConfigWarnings()) logger.warn(warning);
 
 // An uncaught exception leaves the process in an unknown state: record it, give the
 // log and error report a moment to flush, then exit so the supervisor restarts a clean one.

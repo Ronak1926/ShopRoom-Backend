@@ -57,6 +57,47 @@ model PlanPayment {
   @@index([shopkeeperId, createdAt(sort: Desc)])
 }
 
+enum PaymentOrderStatus {
+  /// The order exists at Razorpay and nothing has been paid yet.
+  CREATED
+  /// Paid, and the account or plan extension was granted.
+  FULFILLED
+  /// Paid, but the purchase could not be granted; the money went back automatically.
+  REFUNDED
+  /// Paid, could not be granted, and the automatic refund has not gone through yet (it is retried).
+  NEEDS_REFUND
+}
+
+/// One Razorpay order WE created, and what it is for. Every later step (browser confirmation,
+/// webhook, refund) is checked against this row instead of trusting anything the client or a
+/// receipt string says: the amount, the plan and who it is for were fixed when the order was made.
+model PaymentOrder {
+  /// Also sent to Razorpay as the receipt, so the dashboard and this table line up.
+  id                String             @id
+  razorpayOrderId   String             @unique
+  purpose           PlanPaymentPurpose
+  planType          String
+  /// Paise: what we asked Razorpay to charge.
+  amount            Int
+  status            PaymentOrderStatus @default(CREATED)
+  /// Registration orders: the draft being paid for. Not a foreign key: the draft is deleted on success.
+  draftId           String?
+  /// Renewal orders from the start; registration orders once the account exists.
+  shopkeeperId      String?
+  shopkeeper        Shopkeeper?        @relation(fields: [shopkeeperId], references: [id], onDelete: Cascade)
+  razorpayPaymentId String?            @unique
+  razorpayRefundId  String?
+  /// Why a paid order could not be granted.
+  failureReason     String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  fulfilledAt       DateTime?
+
+  @@index([draftId, planType, status])
+  @@index([shopkeeperId])
+  @@index([status, createdAt])
+}
+
 /// A shopkeeper's notification defaults. The server enforces quietFrom, quietTo, weekendSending
 /// and expiryHours; everything else in settings is stored for the studio to apply as defaults.
 model NotificationPreference {
@@ -162,6 +203,7 @@ model Shopkeeper {
   // Relations
   shop                   Shop?
   planPayments           PlanPayment[]
+  paymentOrders          PaymentOrder[]
   notificationPreference NotificationPreference?
   sentMessages           Message[]               @relation("MessageShopkeeperSender")
   messageReactions       MessageReaction[]

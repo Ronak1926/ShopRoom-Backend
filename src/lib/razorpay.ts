@@ -1,178 +1,212 @@
 /**
- * razorpay.ts — Razorpay SDK wrapper
+ * lib/razorpay.ts — The only place that talks to Razorpay (and the only place that
+ * reads its keys).
  *
- * ─── KEY CONCEPTS ─────────────────────────────────────────────────────────────
+ *   RAZORPAY_KEY_ID          public; sent to the browser to open Checkout
+ *   RAZORPAY_KEY_SECRET      private; creates orders and refunds, signs payment confirmations
+ *   RAZORPAY_WEBHOOK_SECRET  private; signs webhook deliveries (a separate secret, set in the dashboard)
  *
- * KEY_ID  (RAZORPAY_KEY_ID)
- *   • Public identifier — safe to expose in the frontend (window.Razorpay checkout)
- *   • Used only to open the checkout UI
+ * What is checked, and why:
+ *  - A payment confirmation from the browser carries HMAC_SHA256(orderId|paymentId, KEY_SECRET).
+ *    Only Razorpay can produce it, so it proves that payment really belongs to that order.
+ *  - A webhook carries HMAC_SHA256(rawBody, WEBHOOK_SECRET); the RAW bytes are required.
+ *  - Both comparisons are constant time, and both fail CLOSED in production when a secret is missing.
+ *  - Without credentials in development a mock order is issued so the flow can be tried end to end;
+ *    in production that same situation is an error, never a free purchase.
  *
- * KEY_SECRET  (RAZORPAY_KEY_SECRET)
- *   • PRIVATE — never expose to the client
- *   • Used to: create orders, verify payment signatures, verify webhook signatures
- *
- * ─── WHY SIGNATURE VERIFICATION IS MANDATORY ─────────────────────────────────
- *
- * After payment, Razorpay sends payment details (orderId, paymentId, signature)
- * back to the browser. Without server-side verification, an attacker could:
- *  • Fake a payment_id and claim a payment succeeded
- *  • Replay a valid payment for a different order
- *
- * The signature is: HMAC_SHA256(orderId + "|" + paymentId, KEY_SECRET)
- * Only Razorpay (who generated the signature) and you (with KEY_SECRET) can
- * produce or verify this value. We use crypto.timingSafeEqual to prevent
- * timing-based attacks.
- *
- * ─── COMMON SECURITY MISTAKES ────────────────────────────────────────────────
- *  ❌ Trusting the payment_id from the frontend without verifying the signature
- *  ❌ Verifying on the frontend (KEY_SECRET would be exposed)
- *  ❌ Using === for signature comparison (vulnerable to timing attacks)
- *  ❌ Storing KEY_SECRET in source code or client-side env vars
- *  ❌ Not validating the amount on the backend (Razorpay order amount vs. your DB)
- *  ❌ Skipping webhook signature verification (allows spoofed webhook events)
+ * Provider failures are logged with Razorpay's own code and description (never the keys) and
+ * surface to callers as a PaymentProviderError whose message is safe to show.
  */
 
 import Razorpay from "razorpay";
-import crypto from "crypto";
+import crypto from "node:crypto";
 import { isProduction } from "../config/env.js";
 import { logger } from "./logger.js";
 
-// ─── Client factory ───────────────────────────────────────────────────────────
+// ─── Client ───────────────────────────────────────────────────────────────────
 
-/**
- * Returns a Razorpay client instance or null when credentials are absent.
- * Null triggers dev-mode fallbacks in the service layer.
- */
-function getClient(): Razorpay | null {
-  const keyId = process.env.RAZORPAY_KEY_ID;
-  const keySecret = process.env.RAZORPAY_KEY_SECRET;
-  if (!keyId || !keySecret) return null;
-  return new Razorpay({ key_id: keyId, key_secret: keySecret });
-}
-
-// ─── Create Order ─────────────────────────────────────────────────────────────
-
-export interface RazorpayOrderResult {
-  orderId: string;
-  amount: number; // paise
-  currency: string;
-  keyId: string; // public key — sent to frontend to open checkout
-  mock?: boolean;
-}
-
-/**
- * Creates a Razorpay order on the backend.
- *
- * WHY ORDER FIRST?
- * ─────────────────
- * Razorpay requires a server-side order before the checkout opens.
- * This lets us:
- *  • Record the expected amount in a DB-backed order
- *  • Verify afterward that the paid amount matches the ordered amount
- *  • Tie the payment back to our draftId via the `receipt` field
- *
- * @param amount  Amount in paise (e.g. 39900 = ₹399)
- * @param receipt Short unique identifier for your records (not shown to user)
- */
-export async function createRazorpayOrder(
-  amount: number,
-  receipt: string,
-): Promise<RazorpayOrderResult> {
-  const keyId = process.env.RAZORPAY_KEY_ID ?? "";
-  const client = getClient();
-
-  if (!client) {
-    // Without credentials a "mock" order would let anyone register for free.
-    if (isProduction()) throw new Error("Payments are not configured");
-    logger.warn("Razorpay credentials not configured: returning a mock order (development only)", {
-      amountInr: amount / 100,
-      receipt,
-    });
-    return {
-      orderId: `order_mock_${receipt}_${Date.now()}`,
-      amount,
-      currency: "INR",
-      keyId: "rzp_test_mock",
-      mock: true,
-    };
-  }
-
-  const order = (await (client.orders.create({
-    amount,
-    currency: "INR",
-    receipt,
-    // 1 = auto-capture on payment success (no manual capture required)
-    payment_capture: true,
-  }) as unknown)) as { id: string; amount: number | string; currency: string };
-
-  return {
-    orderId: order.id,
-    amount: Number(order.amount),
-    currency: order.currency,
-    keyId,
+/** The few SDK calls we use, typed by us so a test can stand in for the network. */
+export interface RazorpayApi {
+  orders: {
+    create(body: { amount: number; currency: string; receipt: string; payment_capture: 0 | 1; notes?: Record<string, string> }): Promise<{
+      id: string;
+      amount: number | string;
+      currency: string;
+    }>;
+  };
+  payments: {
+    refund(
+      paymentId: string,
+      body: { amount: number; speed: "normal" | "optimum"; notes?: Record<string, string>; receipt?: string },
+    ): Promise<{ id: string }>;
   };
 }
 
-// ─── Verify Payment Signature ─────────────────────────────────────────────────
+let clientOverride: RazorpayApi | null = null;
+
+/** Test seam: replaces the network client. Pass null to restore the real one. */
+export function setRazorpayClientForTests(client: RazorpayApi | null): void {
+  clientOverride = client;
+}
+
+/** The real client, or null when credentials are absent (development then uses mock orders). */
+function getClient(): RazorpayApi | null {
+  if (clientOverride) return clientOverride;
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  if (!keyId || !keySecret) return null;
+  return new Razorpay({ key_id: keyId, key_secret: keySecret }) as unknown as RazorpayApi;
+}
+
+/** Used when the failure should reach the caller as "the payment service had a problem". */
+export class PaymentProviderError extends Error {
+  constructor(
+    message: string,
+    /** True for timeouts and 5xx: trying again later can work. */
+    readonly retryable: boolean,
+  ) {
+    super(message);
+    this.name = "PaymentProviderError";
+  }
+}
+
+const UNAVAILABLE = "The payment service is unavailable right now. Please try again in a moment.";
+const ORDER_TIMEOUT_MS = 10_000;
+const REFUND_TIMEOUT_MS = 15_000;
+
+interface SdkError {
+  statusCode?: number;
+  error?: { code?: string; description?: string };
+}
+
+function describe(err: unknown): { status?: number; code?: string; description: string } {
+  const e = err as SdkError & { message?: string };
+  return { status: e?.statusCode, code: e?.error?.code, description: e?.error?.description ?? e?.message ?? "unknown error" };
+}
+
+/** The SDK has no timeout of its own: without one a stalled connection would hold the request open. */
+function withTimeout<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms} ms`)), ms);
+  });
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
+}
+
+// ─── Create order ─────────────────────────────────────────────────────────────
+
+export interface RazorpayOrderResult {
+  orderId: string;
+  /** Paise. */
+  amount: number;
+  currency: string;
+  /** The public key, for opening Checkout. */
+  keyId: string;
+  /** Development only: no real order exists and nothing is charged. */
+  mock?: boolean;
+}
+
+export const MOCK_ORDER_PREFIX = "order_mock_";
+
+export const isMockOrderId = (orderId: string): boolean => orderId.startsWith(MOCK_ORDER_PREFIX);
+
+export const publicKeyId = (): string => process.env.RAZORPAY_KEY_ID || "rzp_test_mock";
 
 /**
- * Verifies the Razorpay payment signature.
- *
- * Algorithm:
- *   body      = razorpayOrderId + "|" + razorpayPaymentId
- *   expected  = HMAC_SHA256(body, KEY_SECRET).hexdigest()
- *   valid     = timingSafeEqual(expected, razorpaySignature)
- *
- * @returns true if the signature is valid, false otherwise
+ * Creates the order Checkout pays against. Amount is in paise. `receipt` (at most 40 characters)
+ * is our own order id, so a Razorpay dashboard row can be matched to ours.
  */
-export function verifyPaymentSignature(
-  razorpayOrderId: string,
-  razorpayPaymentId: string,
-  razorpaySignature: string,
-): boolean {
+export async function createRazorpayOrder(input: {
+  amount: number;
+  receipt: string;
+  notes?: Record<string, string>;
+}): Promise<RazorpayOrderResult> {
+  const client = getClient();
+
+  if (!client) {
+    // Without credentials a "mock" order would let anyone buy for free.
+    if (isProduction()) throw new PaymentProviderError("Payments are not configured.", false);
+    logger.warn("Razorpay credentials not configured: issuing a mock order (development only)", { receipt: input.receipt });
+    return { orderId: `${MOCK_ORDER_PREFIX}${input.receipt}`, amount: input.amount, currency: "INR", keyId: publicKeyId(), mock: true };
+  }
+
+  try {
+    const order = await withTimeout(
+      client.orders.create({ amount: input.amount, currency: "INR", receipt: input.receipt, payment_capture: 1, notes: input.notes }),
+      ORDER_TIMEOUT_MS,
+      "Razorpay order creation",
+    );
+    return { orderId: order.id, amount: Number(order.amount), currency: order.currency, keyId: publicKeyId() };
+  } catch (err) {
+    const { status, code, description } = describe(err);
+    logger.error("Razorpay order creation failed", undefined, { status, code, description, receipt: input.receipt });
+    throw new PaymentProviderError(UNAVAILABLE, status === undefined || status >= 500);
+  }
+}
+
+// ─── Refund ───────────────────────────────────────────────────────────────────
+
+/** Razorpay's wording when asked to refund money that has already gone back. */
+const ALREADY_REFUNDED = /fully refunded|already (been )?refunded|refund amount .* greater than/i;
+
+/**
+ * Returns the full amount of a payment. Safe to call again: if Razorpay says the payment is
+ * already refunded the call counts as done (`id: null`), because the goal, money returned, is met.
+ */
+export async function refundPayment(
+  paymentId: string,
+  amount: number,
+  notes: Record<string, string> = {},
+): Promise<{ id: string | null }> {
+  const client = getClient();
+
+  if (!client) {
+    if (isProduction()) throw new PaymentProviderError("Payments are not configured.", false);
+    return { id: `rfnd_mock_${paymentId}` };
+  }
+
+  try {
+    const refund = await withTimeout(client.payments.refund(paymentId, { amount, speed: "normal", notes }), REFUND_TIMEOUT_MS, "Razorpay refund");
+    return { id: refund.id };
+  } catch (err) {
+    const { status, code, description } = describe(err);
+    if (ALREADY_REFUNDED.test(description)) return { id: null };
+    logger.error("Razorpay refund failed", undefined, { status, code, description, paymentId });
+    throw new PaymentProviderError("The refund could not be started.", status === undefined || status >= 500);
+  }
+}
+
+// ─── Signatures ───────────────────────────────────────────────────────────────
+
+/** Constant-time comparison of two hex digests; false for any malformed input. */
+function sameDigest(expectedHex: string, receivedHex: string): boolean {
+  if (!/^[0-9a-f]+$/i.test(receivedHex) || receivedHex.length !== expectedHex.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(expectedHex, "hex"), Buffer.from(receivedHex, "hex"));
+}
+
+/**
+ * Checks the signature Checkout hands the browser after a payment:
+ * HMAC_SHA256(`${orderId}|${paymentId}`, KEY_SECRET).
+ */
+export function verifyPaymentSignature(razorpayOrderId: string, razorpayPaymentId: string, razorpaySignature: string): boolean {
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
   if (!keySecret) {
-    // Dev fallback only: skipping verification in production would make every payment "valid".
+    // Skipping verification in production would make every payment "valid".
     if (isProduction()) return false;
     logger.warn("RAZORPAY_KEY_SECRET not set: skipping signature verification (development only)");
     return true;
   }
 
-  const body = `${razorpayOrderId}|${razorpayPaymentId}`;
-  const expectedHex = crypto
-    .createHmac("sha256", keySecret)
-    .update(body)
-    .digest("hex");
-
-  // timingSafeEqual prevents timing-based attacks that could leak the secret
-  try {
-    const expected = Buffer.from(expectedHex, "hex");
-    const received = Buffer.from(razorpaySignature, "hex");
-    if (expected.length !== received.length) return false;
-    return crypto.timingSafeEqual(expected, received);
-  } catch {
-    // Buffer.from throws if the signature isn't valid hex
-    return false;
-  }
+  const expected = crypto.createHmac("sha256", keySecret).update(`${razorpayOrderId}|${razorpayPaymentId}`).digest("hex");
+  return sameDigest(expected, razorpaySignature);
 }
 
-// ─── Verify Webhook Signature ─────────────────────────────────────────────────
-
 /**
- * Verifies a Razorpay webhook signature.
- *
- * Razorpay sends: X-Razorpay-Signature: HMAC_SHA256(rawBody, WEBHOOK_SECRET)
- *
- * IMPORTANT: The raw request body (before JSON.parse) must be used here.
- * If you pass the parsed/re-stringified body the signature will not match.
- *
- * Setup at: razorpay.com Dashboard → Settings → Webhooks → Add webhook URL
+ * Checks a webhook delivery: HMAC_SHA256(rawBody, WEBHOOK_SECRET) in X-Razorpay-Signature.
+ * `rawBody` must be the bytes as received; a parsed and re-serialised body never matches.
  */
-export function verifyWebhookSignature(
-  rawBody: string,
-  razorpaySignature: string,
-): boolean {
+export function verifyWebhookSignature(rawBody: string, razorpaySignature: string): boolean {
   const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
   if (!webhookSecret) {
@@ -181,49 +215,6 @@ export function verifyWebhookSignature(
     return false;
   }
 
-  const expected = crypto
-    .createHmac("sha256", webhookSecret)
-    .update(rawBody)
-    .digest("hex");
-
-  try {
-    return crypto.timingSafeEqual(
-      Buffer.from(expected),
-      Buffer.from(razorpaySignature),
-    );
-  } catch {
-    return false;
-  }
-}
-
-// ─── Order lookup ─────────────────────────────────────────────────────────────
-
-export interface RazorpayOrderSummary {
-  /** Paise; null for a dev mock order, which was never actually charged. */
-  amount: number | null;
-  receipt: string | null;
-}
-
-/**
- * The order's real amount and receipt, as Razorpay recorded them when WE
- * created it. A payment signature only proves some order was paid; this is how
- * we confirm it was the order created for this draft and this plan, and not
- * a cheaper one (or someone else's) replayed against a different registration.
- */
-export async function fetchOrderSummary(orderId: string): Promise<RazorpayOrderSummary> {
-  const client = getClient();
-
-  if (!client) {
-    if (isProduction()) throw new Error("Payments are not configured");
-    // Dev mock orders (see createRazorpayOrder) encode their receipt in the id;
-    // the amount was never charged, so the caller's plan amount stands in.
-    const match = /^order_mock_(.+)_\d+$/.exec(orderId);
-    return { amount: null, receipt: match?.[1] ?? null };
-  }
-
-  const order = (await (client.orders.fetch(orderId) as unknown)) as {
-    amount: number | string;
-    receipt?: string | null;
-  };
-  return { amount: Number(order.amount), receipt: order.receipt ?? null };
+  const expected = crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
+  return sameDigest(expected, razorpaySignature);
 }

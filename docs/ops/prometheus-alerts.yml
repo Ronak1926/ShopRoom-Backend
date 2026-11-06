@@ -39,6 +39,20 @@ groups:
           summary: "Payments are failing verification"
           runbook: "docs/ops/RUNBOOK.md#razorpay-is-down-or-payments-fail"
 
+      - alert: RefundNotGoingThrough
+        expr: increase(payment_refunds_total{result="failed"}[30m]) > 0
+        labels: { severity: page }
+        annotations:
+          summary: "A payment could not be honoured and its refund failed (see PaymentOrder rows in NEEDS_REFUND)"
+          runbook: "docs/ops/RUNBOOK.md#razorpay-is-down-or-payments-fail"
+
+      - alert: PaymentWebhookStruggling
+        expr: increase(razorpay_webhook_events_total{result=~"error|refund_pending|mismatch"}[15m]) >= 3
+        labels: { severity: page }
+        annotations:
+          summary: "Payment webhooks are failing to complete (database trouble, refunds stuck, or amounts not matching)"
+          runbook: "docs/ops/RUNBOOK.md#razorpay-is-down-or-payments-fail"
+
       - alert: WebhookSignatureFailures
         expr: increase(razorpay_webhook_events_total{result="invalid_signature"}[10m]) >= 3
         labels: { severity: page }

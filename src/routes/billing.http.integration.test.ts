@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { createDesign, createShop, createCustomer, integrationConfigured, resetDatabase, stubSendEach } from "../test/integration.js";
 import { startTestApp, type TestApp } from "../test/http.js";
-import { DAY_MS, PLANS, planEndsAt } from "../services/plans.js";
+import { DAY_MS, planEndsAt } from "../services/plans.js";
 
 const enabled = integrationConfigured();
 const DAY = DAY_MS;
@@ -126,7 +126,7 @@ describe("plan expiry, billing and renewal", { skip: !enabled }, () => {
       const order = orderId ? { orderId } : (await t.call("POST", "/api/shopkeeper/billing/order", { token: s.token, body: { planType } })).json.data;
       return t.call("POST", "/api/shopkeeper/billing/verify", {
         token: s.token,
-        body: { planType, razorpayOrderId: order.orderId, razorpayPaymentId: paymentId, razorpaySignature: "dev" },
+        body: { razorpayOrderId: order.orderId, razorpayPaymentId: paymentId, razorpaySignature: "dev" },
       });
     }
 
@@ -153,12 +153,13 @@ describe("plan expiry, billing and renewal", { skip: !enabled }, () => {
 
     it("applies two renewals that land together one after the other", async () => {
       const s = await shop(0, "1m");
-      const orders = await Promise.all([1, 2].map(() => t.call("POST", "/api/shopkeeper/billing/order", { token: s.token, body: { planType: "1m" } })));
-      const results = await Promise.all(orders.map((o, i) => renew(s, "1m", `pay_race_${i}`, o.json.data.orderId)));
+      // Different plans, so these are two distinct orders (the same plan would reuse one order).
+      const orders = await Promise.all(["1m", "2m"].map((planType) => t.call("POST", "/api/shopkeeper/billing/order", { token: s.token, body: { planType } })));
+      const results = await Promise.all(orders.map((o, i) => renew(s, i === 0 ? "1m" : "2m", `pay_race_${i}`, o.json.data.orderId)));
       assert.deepEqual(results.map((r) => r.status), [200, 200]);
       const row = await t.prisma.shopkeeper.findUniqueOrThrow({ where: { id: s.shopkeeperId } });
       const daysLeft = (row.planExpiresAt.getTime() - Date.now()) / DAY;
-      assert.ok(daysLeft > 59 && daysLeft <= 60, `two 30-day renewals = ~60 days, got ${daysLeft.toFixed(1)}`);
+      assert.ok(daysLeft > 89 && daysLeft <= 90, `30 + 60 days = ~90 days, got ${daysLeft.toFixed(1)}`);
     });
 
     it("refuses a payment that was already used, even for another account", async () => {
@@ -181,15 +182,10 @@ describe("plan expiry, billing and renewal", { skip: !enabled }, () => {
       assert.equal(await t.prisma.planPayment.count(), 0);
     });
 
-    it("refuses a paid order replayed against a different plan only when the amount is known", async () => {
-      const { assertOrderMatchesPlan } = await import("../services/shopkeeper.service.js");
-      assert.throws(() => assertOrderMatchesPlan({ amount: PLANS["1m"].amount, receipt: "sk_abc" }, "x", "3m"));
-    });
-
     it("rejects an unknown plan and malformed payment details", async () => {
       const s = await shop(-DAY);
       assert.equal((await t.call("POST", "/api/shopkeeper/billing/order", { token: s.token, body: { planType: "12m" } })).status, 400);
-      assert.equal((await t.call("POST", "/api/shopkeeper/billing/verify", { token: s.token, body: { planType: "1m" } })).status, 400);
+      assert.equal((await t.call("POST", "/api/shopkeeper/billing/verify", { token: s.token, body: { razorpayOrderId: "order_1" } })).status, 400);
       assert.equal(await t.prisma.planPayment.count(), 0);
     });
 
@@ -204,10 +200,11 @@ describe("plan expiry, billing and renewal", { skip: !enabled }, () => {
       process.env.NODE_ENV = "production";
       try {
         const order = await t.call("POST", "/api/shopkeeper/billing/order", { token: s.token, body: { planType: "1m" } });
-        assert.equal(order.status, 500);
+        assert.equal(order.status, 502);
+        assert.match(order.json.message, /not configured/i);
         const verify = await t.call("POST", "/api/shopkeeper/billing/verify", {
           token: s.token,
-          body: { planType: "1m", razorpayOrderId: "order_mock_rn_x_1", razorpayPaymentId: "pay_x", razorpaySignature: "x" },
+          body: { razorpayOrderId: "order_mock_po_x", razorpayPaymentId: "pay_x", razorpaySignature: "ab" },
         });
         assert.equal(verify.status, 400, "an unverifiable signature never renews");
       } finally {

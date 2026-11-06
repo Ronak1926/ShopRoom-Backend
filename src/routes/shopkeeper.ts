@@ -11,14 +11,12 @@ import {
   validatePhone,
   sendPhoneOtpHandler,
   verifyPhoneOtpHandler,
-  createPaymentOrder,
-  verifyPayment,
-  handleWebhook,
   uploadLogo,
   loginShopkeeper,
   logoutAllShopkeeperHandler,
   deleteShopkeeperAccountHandler,
 } from "../controllers/shopkeeper.controller.js";
+import { createPaymentOrder, handleWebhook, verifyPayment } from "../controllers/payment.controller.js";
 import { requireShopkeeperAuth } from "../middleware/shopkeeperAuth.js";
 import {
   changePasswordHandler,

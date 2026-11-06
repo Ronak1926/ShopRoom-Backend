@@ -6,6 +6,7 @@
 
 import { prisma } from "../database/prisma.js";
 import { logger } from "../lib/logger.js";
+import { retryPendingRefunds } from "./paymentSettlement.service.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RUN_INTERVAL_MS = DAY_MS;
@@ -19,6 +20,11 @@ export const RETENTION = {
   deliveryRecordDays: 180,
   /** FCM itself retires tokens unused for 270 days. */
   inactiveDeviceDays: 270,
+  /**
+   * An order nobody paid. Razorpay orders do not expire, but the sign-up session they belong to does
+   * (7 days), so a payment this late could not be honoured anyway. Paid orders are never purged here.
+   */
+  unpaidOrderDays: 90,
 } as const;
 
 export interface RetentionResult {
@@ -28,12 +34,13 @@ export interface RetentionResult {
   stalePositions: number;
   deliveryRecords: number;
   inactiveDevices: number;
+  paymentOrders: number;
 }
 
 export async function purgeExpiredData(now = new Date()): Promise<RetentionResult> {
   const ago = (days: number) => new Date(now.getTime() - days * DAY_MS);
 
-  const [resetTokens, rateLimitCounters, emailOtps, stalePositions, deliveryRecords, inactiveDevices] = await Promise.all([
+  const [resetTokens, rateLimitCounters, emailOtps, stalePositions, deliveryRecords, inactiveDevices, paymentOrders] = await Promise.all([
     prisma.passwordResetToken.deleteMany({ where: { expiresAt: { lt: ago(RETENTION.emailOtpGraceDays) } } }),
     // Windows are at most an hour long; an expired counter does nothing and is only clutter.
     prisma.$executeRaw`DELETE FROM "RateLimitCounter" WHERE "resetAt" < now() - interval '1 hour'`,
@@ -50,6 +57,7 @@ export async function purgeExpiredData(now = new Date()): Promise<RetentionResul
     }),
     prisma.notificationSendRecipient.deleteMany({ where: { createdAt: { lt: ago(RETENTION.deliveryRecordDays) } } }),
     prisma.customerDevice.deleteMany({ where: { lastSeenAt: { lt: ago(RETENTION.inactiveDeviceDays) } } }),
+    prisma.paymentOrder.deleteMany({ where: { status: "CREATED", createdAt: { lt: ago(RETENTION.unpaidOrderDays) } } }),
   ]);
 
   return {
@@ -59,6 +67,7 @@ export async function purgeExpiredData(now = new Date()): Promise<RetentionResul
     stalePositions: stalePositions.count,
     deliveryRecords: deliveryRecords.count,
     inactiveDevices: inactiveDevices.count,
+    paymentOrders: paymentOrders.count,
   };
 }
 
@@ -71,6 +80,12 @@ async function runOnce(): Promise<void> {
     if (total > 0) logger.info("Retention purge", { ...result });
   } catch (err) {
     logger.error("Retention purge failed", err);
+  }
+  try {
+    const refunded = await retryPendingRefunds();
+    if (refunded > 0) logger.info("Pending refunds completed", { refunded });
+  } catch (err) {
+    logger.error("Refund retry failed", err);
   }
 }
 

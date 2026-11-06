@@ -45,7 +45,7 @@ export class RollingCounter {
   }
 }
 
-export type AlertKind = "elevated_5xx" | "send_failure_spike" | "payment_failures" | "webhook_signature_failures";
+export type AlertKind = "elevated_5xx" | "send_failure_spike" | "payment_failures" | "webhook_signature_failures" | "refund_failed";
 
 export const THRESHOLDS = {
   /** Alert when at least this share of requests in the window were 5xx… */

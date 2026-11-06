@@ -10,7 +10,7 @@ The server refuses to start with `NODE_ENV=production` unless the secrets marked
 | `MESSAGE_ENCRYPTION_KEY` | no | same | Keep stable once set; changing it makes existing messages unreadable. |
 | `DATABASE_URL` | yes | database provider | Use a least-privilege role (no superuser, no DDL at runtime) and TLS. |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | yes | Razorpay dashboard → API keys | Live keys only in production. |
-| `RAZORPAY_WEBHOOK_SECRET` | yes | Razorpay dashboard → Webhooks | Webhooks are rejected while unset. |
+| `RAZORPAY_WEBHOOK_SECRET` | yes | Razorpay dashboard → Webhooks | Not the API key secret. Webhooks are rejected while unset. To rotate, change it in the dashboard and in the environment together; deliveries in the gap fail their signature and are retried by Razorpay for about a day, so nothing is lost. Use a different secret per environment. |
 | `TWILIO_ACCOUNT_SID` / `AUTH_TOKEN` / `VERIFY_SERVICE_SID` | yes | Twilio console | Prefer an API key over the account auth token. |
 | `FIREBASE_PROJECT_ID` / `CLIENT_EMAIL` / `PRIVATE_KEY` | yes | Google Cloud → service account → keys | Create a new key, deploy, then delete the old key. |
 | `CLOUDINARY_*` | for uploads | Cloudinary console | |

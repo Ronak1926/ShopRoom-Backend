@@ -7,6 +7,7 @@ import {
   isProduction,
   productionConfigProblems,
   trustProxySetting,
+  productionConfigWarnings,
 } from "./env.js";
 
 const completeEnv = {
@@ -15,7 +16,7 @@ const completeEnv = {
   DATABASE_URL: "postgres://db",
   CORS_ORIGINS: "https://shoproom.example",
   FRONTEND_BASE_URL: "https://shoproom.example",
-  RAZORPAY_KEY_ID: "id",
+  RAZORPAY_KEY_ID: "rzp_live_abc123XYZ789",
   RAZORPAY_KEY_SECRET: "secret",
   RAZORPAY_WEBHOOK_SECRET: "whsec",
   TWILIO_ACCOUNT_SID: "sid",
@@ -41,6 +42,24 @@ describe("production configuration guard", () => {
       assert.ok(!err.message.includes(completeEnv.JWT_SECRET));
       return true;
     });
+  });
+
+  it("rejects a Razorpay key id that is not a Razorpay key id", () => {
+    for (const bad of ["id", "rzp_prod_abcdef123", "rzp_live_", "RZP_LIVE_abc123456", " rzp_live_abc 123456"]) {
+      const problems = productionConfigProblems({ ...completeEnv, RAZORPAY_KEY_ID: bad });
+      assert.equal(problems.length, 1, bad);
+      assert.match(problems[0], /RAZORPAY_KEY_ID/);
+    }
+    assert.deepEqual(productionConfigProblems({ ...completeEnv, RAZORPAY_KEY_ID: "rzp_test_abc123XYZ789" }), []);
+  });
+
+  it("warns, but does not refuse, when production runs on a test key", () => {
+    assert.deepEqual(productionConfigWarnings(completeEnv), []);
+    const warnings = productionConfigWarnings({ ...completeEnv, RAZORPAY_KEY_ID: "rzp_test_abc123XYZ789" });
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /TEST key/);
+    assert.doesNotThrow(() => assertProductionConfig({ ...completeEnv, RAZORPAY_KEY_ID: "rzp_test_abc123XYZ789" }));
+    assert.deepEqual(productionConfigWarnings({ NODE_ENV: "development", RAZORPAY_KEY_ID: "rzp_test_abc123XYZ789" }), [], "tests keys are right outside production");
   });
 
   it("rejects a short JWT secret", () => {

@@ -185,6 +185,9 @@ export const schedulerRuns = register(
 export const paymentVerifications = register(
   new Counter("payment_verifications_total", "Razorpay payment verifications by outcome (success, failure)."),
 );
+export const paymentRefunds = register(
+  new Counter("payment_refunds_total", "Refunds issued for payments that could not be honoured, by result (refunded, failed)."),
+);
 export const razorpayWebhooks = register(
   new Counter("razorpay_webhook_events_total", "Razorpay webhook deliveries by result."),
 );

@@ -41,12 +41,15 @@ Symptoms: `send_failure_spike` alert, `PushDeliveryFailing`, sends marked `FAILE
 
 ## Razorpay is down or payments fail
 
-Symptoms: `payment_failures` or `webhook_signature_failures` alert, shopkeepers cannot finish sign-up.
+How payments work and every situation they handle: `docs/ops/PAYMENTS.md`.
 
-1. Razorpay status page. During an outage sign-up cannot complete; drafts are kept for 7 days, so users can resume. Check the Razorpay dashboard for any charge before telling a user they were not charged.
-2. Webhook signature failures: confirm `RAZORPAY_WEBHOOK_SECRET` matches the dashboard (a rotated secret is the usual cause). Signature failures with the right secret mean someone is sending forged webhooks: the requests are already rejected; leave it.
-3. "This payment does not belong to this registration" / "amount does not match": the paid order is not the one created for that draft and plan. Look the payment up in the dashboard before overriding anything; never register an account by hand without a captured payment.
-4. Customer paid but registration did not complete (browser closed after paying): find the payment in the dashboard, then ask the shopkeeper to sign in to resume the same draft (their email and password restore it) and press pay again only if no charge is shown.
+Symptoms: `payment_failures`, `webhook_signature_failures` or `refund_failed` alert; shopkeepers cannot finish sign-up or renewal.
+
+1. Razorpay status page. During an outage nobody can pay (the API answers "The payment service is unavailable"), but nothing is lost: drafts are kept for 7 days, and a payment that completes at Razorpay is finished by the webhook even if the buyer's browser never reports back.
+2. Webhook signature failures: confirm `RAZORPAY_WEBHOOK_SECRET` matches the dashboard webhook (a rotated or mixed-up secret is the usual cause; it is not the API key secret). With the right secret, failures mean someone is sending forged webhooks: they are already rejected; leave it.
+3. "This payment does not belong to…" or a webhook "does not match the order": the payment is not what we created the order for. Look it up in the dashboard before doing anything; never create an account by hand without a captured payment.
+4. A buyer says they paid but have no account or plan: look for the payment in the dashboard, then `SELECT * FROM "PaymentOrder" WHERE "razorpayPaymentId" = '<pay_…>'`. `FULFILLED` means it was granted (they should log in with the email and password they chose); `REFUNDED` means it was returned; `CREATED` means the webhook has not arrived: check the webhook's delivery log in the Razorpay dashboard and redeliver it from there (safe to repeat).
+5. `NEEDS_REFUND` orders (alert `refund_failed`): the payment could not be granted and the automatic refund did not go through. It is retried on every webhook redelivery and daily. If it persists, refund the payment by hand in the dashboard; the system then marks it `REFUNDED` itself.
 
 ## Twilio (phone OTP) is down
 

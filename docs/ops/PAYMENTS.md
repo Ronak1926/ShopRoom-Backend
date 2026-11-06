@@ -61,6 +61,7 @@ A webhook is also compared with our row before anything is granted: it must be `
 | Our database fails mid-grant | Rolled back, webhook answers 500, Razorpay retries. Nothing is half applied. |
 | Razorpay is down when starting a payment | "The payment service is unavailable" (503 for a timeout or 5xx, 502 for a rejected key). No order row is left behind. |
 | Buyer clicks Pay twice, or reopens Checkout | The same unpaid order (up to 2 hours old) is reused. |
+| A purchase is granted | One receipt email goes to the shopkeeper (see below). Whichever of the browser and the webhook grants it sends it; repeats do not. |
 
 ## Switching it on
 
@@ -79,6 +80,18 @@ A webhook is also compared with our row before anything is granted: it must be `
 4. **Go live.** Complete Razorpay's KYC, generate **live** keys (`rzp_live_…`), create a second webhook for the production URL with its own secret, and set all three variables in the production environment. The server refuses to start in production with a malformed `RAZORPAY_KEY_ID`, and logs a warning if it is a test key (payments would succeed without real money moving).
 
 Use test keys on staging and live keys only on production; never share a webhook secret between environments.
+
+## Receipts
+
+A receipt is an email with the shop, plan, amount, date, Razorpay payment id and our order reference. It is sent right after the purchase is granted, and it is never part of the payment: if the mail fails, the buyer still gets their account or their extra time, the failure is logged, and nothing is shown to them.
+
+`PaymentOrder.receiptSentAt` makes it once-only: the sender sets it before sending and clears it if the mail fails. The daily maintenance job retries any fulfilled order that still has none, for a week (and not within the first 10 minutes, while the original sender may still be working). If SMTP is not configured, receipts are skipped with a warning and picked up by that job once it is.
+
+This is a payment receipt, not a GST tax invoice. See "Not covered yet".
+
+```sql
+SELECT id, "fulfilledAt" FROM "PaymentOrder" WHERE status = 'FULFILLED' AND "receiptSentAt" IS NULL ORDER BY "fulfilledAt";
+```
 
 ## Operating it
 
@@ -103,4 +116,4 @@ Metrics and alerts: `razorpay_webhook_events_total{result}`, `payment_verificati
 
 ## Not covered yet
 
-Payment receipts by email and GST invoices (Razorpay can email its own receipts from the dashboard), partial refunds, and automatic plan changes when a refund is made in the dashboard.
+GST tax invoices (they need the business's GSTIN, invoice numbering and the buyer's billing details; the receipt email is not one), partial refunds, and automatic plan changes when a refund is made in the dashboard.

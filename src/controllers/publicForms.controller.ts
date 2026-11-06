@@ -5,7 +5,7 @@
 
 import type { Request, Response } from "express";
 import z from "zod";
-import { relayContactMessage, subscribeToNewsletter } from "../services/publicForms.service.js";
+import { relayContactMessage, subscribeToNewsletter, unsubscribeFromNewsletter } from "../services/publicForms.service.js";
 
 const email = z.string().trim().toLowerCase().email().max(254);
 
@@ -26,6 +26,7 @@ const contactSchema = z.object({
 });
 
 const newsletterSchema = z.object({ email });
+const unsubscribeSchema = z.object({ token: z.string().min(1).max(600) });
 
 // POST /api/public/contact
 export async function contactHandler(req: Request, res: Response): Promise<void> {
@@ -59,5 +60,24 @@ export async function newsletterHandler(req: Request, res: Response): Promise<vo
   } catch (err) {
     console.error("Newsletter sign-up failed:", (err as Error)?.message);
     res.status(500).json({ message: "Could not subscribe right now. Please try again later." });
+  }
+}
+
+// POST /api/public/newsletter/unsubscribe
+export async function newsletterUnsubscribeHandler(req: Request, res: Response): Promise<void> {
+  const parsed = unsubscribeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ message: "This unsubscribe link is not valid." });
+    return;
+  }
+  try {
+    if (!(await unsubscribeFromNewsletter(parsed.data.token))) {
+      res.status(400).json({ message: "This unsubscribe link is not valid." });
+      return;
+    }
+    res.json({ message: "You have been unsubscribed." });
+  } catch (err) {
+    console.error("Newsletter unsubscribe failed:", (err as Error)?.message);
+    res.status(500).json({ message: "Could not unsubscribe right now. Please try again." });
   }
 }

@@ -185,3 +185,9 @@ export const newsletterLimiter = limiter(
   10,
   "Too many sign-up attempts. Please try again later.",
 );
+export const newsletterUnsubscribeLimiter = limiter(
+  "newsletter-unsubscribe",
+  60 * MINUTE,
+  30,
+  "Too many attempts. Please try again later.",
+);

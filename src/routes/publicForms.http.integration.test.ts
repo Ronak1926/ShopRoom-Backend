@@ -12,6 +12,7 @@ interface Mail {
   subject: string;
   text: string;
   html: string;
+  headers?: Record<string, string>;
 }
 
 describe("public site forms", { skip: !enabled }, () => {
@@ -144,6 +145,80 @@ describe("public site forms", { skip: !enabled }, () => {
       assert.equal(statuses.filter((s) => s === 201).length, 10);
       assert.equal(statuses.at(-1), 429);
       assert.equal(await t.prisma.newsletterSubscriber.count(), 10);
+    });
+
+    describe("welcome email and unsubscribing", () => {
+      const savedSmtp = { host: process.env.SMTP_HOST, user: process.env.SMTP_USER };
+      before(() => {
+        process.env.SMTP_HOST = "smtp.test";
+        process.env.SMTP_USER = "from@example.test";
+      });
+      after(() => {
+        for (const [name, value] of [["SMTP_HOST", savedSmtp.host], ["SMTP_USER", savedSmtp.user]] as const) {
+          if (value === undefined) delete process.env[name];
+          else process.env[name] = value;
+        }
+      });
+
+      const unsubscribe = (token: unknown) => t.call("POST", "/api/public/newsletter/unsubscribe", { body: { token } });
+      const waitForMail = async () => {
+        for (let i = 0; i < 100 && mails.length === 0; i += 1) await new Promise((r) => setTimeout(r, 20));
+      };
+      const tokenFrom = (mail: Mail) => /#token=([A-Za-z0-9_.-]+)/.exec(mail.text)?.[1] ?? "";
+
+      it("sends a welcome email with a way out to a new address only, never again for a repeat", async () => {
+        assert.equal((await subscribe({ email: "reader@example.test" })).status, 201);
+        await waitForMail();
+        assert.equal(mails.length, 1);
+        assert.equal(mails[0].to, "reader@example.test");
+        assert.match(mails[0].text, /\/unsubscribe#token=/, "the token is in the fragment, so it stays out of logs");
+        assert.ok(mails[0].html.includes("/unsubscribe#token="));
+        assert.match(String(mails[0].headers?.["List-Unsubscribe"]), /^<.*\/unsubscribe#token=.+>$/);
+
+        assert.equal((await subscribe({ email: "READER@example.test" })).status, 201);
+        await new Promise((r) => setTimeout(r, 100));
+        assert.equal(mails.length, 1, "repeating the form cannot be used to mail someone");
+      });
+
+      it("still subscribes when the welcome email cannot be sent", async () => {
+        failSending = true;
+        assert.equal((await subscribe({ email: "reader@example.test" })).status, 201);
+        await new Promise((r) => setTimeout(r, 100));
+        assert.equal(await t.prisma.newsletterSubscriber.count(), 1);
+      });
+
+      it("removes the address when the link from the email is used, and a second use is harmless", async () => {
+        await subscribe({ email: "reader@example.test" });
+        await subscribe({ email: "other@example.test" });
+        await waitForMail();
+        const token = tokenFrom(mails[0]);
+        assert.ok(token);
+
+        const first = await unsubscribe(token);
+        assert.equal(first.status, 200, JSON.stringify(first.json));
+        assert.deepEqual((await t.prisma.newsletterSubscriber.findMany()).map((r) => r.email), ["other@example.test"], "only that address left the list");
+        assert.equal((await unsubscribe(token)).status, 200, "idempotent");
+      });
+
+      it("will not remove anyone on a forged, swapped or malformed token", async () => {
+        await subscribe({ email: "reader@example.test" });
+        await waitForMail();
+        const [, signature] = tokenFrom(mails[0]).split(".");
+        const swapped = `${Buffer.from("reader@example.test").toString("base64url")}.${signature.slice(0, -2)}AA`;
+        const otherAddress = `${Buffer.from("someone@example.test").toString("base64url")}.${signature}`;
+        for (const token of [swapped, otherAddress, "garbage", "a.b.c", "", 5, null, "x".repeat(700)]) {
+          assert.equal((await unsubscribe(token)).status, 400, JSON.stringify(token)?.slice(0, 30));
+        }
+        assert.equal((await unsubscribe(undefined)).status, 400);
+        assert.equal(await t.prisma.newsletterSubscriber.count(), 1);
+      });
+
+      it("is rate limited per client", async () => {
+        const statuses: number[] = [];
+        for (let i = 0; i < 32; i += 1) statuses.push((await unsubscribe("garbage")).status);
+        assert.equal(statuses.filter((s) => s === 400).length, 30);
+        assert.equal(statuses.at(-1), 429);
+      });
     });
   });
 });

@@ -5,7 +5,9 @@
  */
 
 import { prisma } from "../database/prisma.js";
-import { sendContactEmail, type ContactMessage } from "../lib/email.js";
+import { isEmailConfigured, sendContactEmail, sendNewsletterWelcomeEmail, type ContactMessage } from "../lib/email.js";
+import { logger } from "../lib/logger.js";
+import { createUnsubscribeToken, readUnsubscribeToken } from "../utils/unsubscribeToken.js";
 
 /** Where contact messages go: CONTACT_EMAIL, else the mailbox the app already sends from. */
 export function contactInbox(env: Record<string, string | undefined> = process.env): string | null {
@@ -20,7 +22,26 @@ export async function relayContactMessage(message: ContactMessage): Promise<bool
   return true;
 }
 
-/** Idempotent: subscribing twice is the same as once, and the caller cannot tell whether the address was already there. */
+/** The token goes in the fragment, like the password-reset link, so it never reaches a server log or a Referer header. */
+export function newsletterUnsubscribeUrl(email: string): string {
+  const base = (process.env.FRONTEND_BASE_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+  return `${base}/unsubscribe#token=${createUnsubscribeToken(email)}`;
+}
+
+/**
+ * Idempotent: subscribing twice is the same as once, and the caller cannot tell whether the address was already there.
+ * Only a new address gets the welcome email (with its way out), so repeating the form cannot be used to mail someone.
+ */
 export async function subscribeToNewsletter(email: string): Promise<void> {
-  await prisma.newsletterSubscriber.createMany({ data: [{ email }], skipDuplicates: true });
+  const { count } = await prisma.newsletterSubscriber.createMany({ data: [{ email }], skipDuplicates: true });
+  if (count === 0 || !isEmailConfigured()) return;
+  sendNewsletterWelcomeEmail(email, newsletterUnsubscribeUrl(email)).catch((err: unknown) => logger.warn("Newsletter welcome email failed", { error: (err as Error)?.message }));
+}
+
+/** Removes the address a valid token was made for. Returns false for a token we did not issue; true even if the address was already gone. */
+export async function unsubscribeFromNewsletter(token: string): Promise<boolean> {
+  const email = readUnsubscribeToken(token);
+  if (!email) return false;
+  await prisma.newsletterSubscriber.deleteMany({ where: { email } });
+  return true;
 }

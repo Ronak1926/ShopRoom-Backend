@@ -147,3 +147,26 @@ export async function sendPaymentReceiptEmail(to: string, receipt: PaymentReceip
     html,
   });
 }
+
+/** Sent once, when an address joins the newsletter. It is also the person's way out. */
+export async function sendNewsletterWelcomeEmail(to: string, unsubscribeUrl: string) {
+  await getTransporter().sendMail({
+    from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
+    to,
+    subject: "You're subscribed to ShopRoom updates",
+    headers: { "List-Unsubscribe": `<${unsubscribeUrl}>` },
+    text: `Thanks for subscribing to ShopRoom updates.\n\nIf this wasn't you, or you've changed your mind, unsubscribe here: ${unsubscribeUrl}\n\nWe only email you when there is news worth sharing.`,
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#F5F2FF;border-radius:12px;">
+        <div style="text-align:center;margin-bottom:24px;"><span style="font-size:22px;font-weight:700;color:#19192F;">ShopRoom</span></div>
+        <div style="background:#fff;border-radius:10px;padding:32px;text-align:center;">
+          <p style="font-size:16px;color:#474554;margin:0 0 12px;">Thanks for subscribing to ShopRoom updates.</p>
+          <p style="font-size:13px;color:#474554;margin:0;">We only email you when there is news worth sharing.</p>
+        </div>
+        <p style="font-size:11px;color:#474554;text-align:center;margin-top:16px;opacity:0.7;">
+          If this wasn't you, or you've changed your mind, <a href="${escapeHtml(unsubscribeUrl)}" style="color:#4329BB;">unsubscribe here</a>.
+        </p>
+      </div>
+    `,
+  });
+}

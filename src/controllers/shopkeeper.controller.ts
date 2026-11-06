@@ -23,6 +23,7 @@ import { disconnectViewer } from "../realtime/socket.js";
 import { logger } from "../lib/logger.js";
 import { recordSecurityEvent } from "../services/securityEvent.service.js";
 import { isMfaEnabled } from "../services/mfa.service.js";
+import { clearSessionCookie, sendSession } from "../lib/sessionCookie.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -314,8 +315,7 @@ export async function loginShopkeeper(
       return;
     }
     recordSecurityEvent(req, { type: "LOGIN_SUCCESS", role: "SHOPKEEPER", actorId: shopkeeper.id, detail: { method: "password" } });
-    res.json({
-      token: signShopkeeperToken(shopkeeper.id, shopkeeper.tokenVersion),
+    sendSession(req, res, "shopkeeper", signShopkeeperToken(shopkeeper.id, shopkeeper.tokenVersion), {
       shopkeeperId: shopkeeper.id,
       shopName: shopkeeper.shopName,
     });
@@ -332,6 +332,7 @@ export async function logoutAllShopkeeperHandler(req: Request, res: Response): P
   await revokeSessions("shopkeeper", req.shopkeeperId!);
   recordSecurityEvent(req, { type: "SESSIONS_REVOKED", role: "SHOPKEEPER", actorId: req.shopkeeperId });
   disconnectViewer(`SK:${req.shopkeeperId}`);
+  clearSessionCookie(res, "shopkeeper");
   res.json({ message: "Signed out everywhere" });
 }
 

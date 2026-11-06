@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { verifyCustomerToken } from "../utils/jwt.js";
 import { isSessionActive } from "../services/session.service.js";
+import { tokenFor } from "./sessionToken.js";
 
 declare global {
   namespace Express {
@@ -15,13 +16,13 @@ export async function requireCustomerAuth(
   res: Response,
   next: NextFunction,
 ) {
-  const header = req.header("authorization");
-  if (!header || !header.toLowerCase().startsWith("bearer ")) {
-    res.status(401).json({ message: "Missing Authorization header" });
+  const source = tokenFor(req, "customer");
+  if ("rejected" in source) {
+    if (source.rejected === "cross-site") res.status(403).json({ message: "This request is not allowed from this origin" });
+    else res.status(401).json({ message: "Missing Authorization header" });
     return;
   }
-
-  const token = header.slice("bearer ".length).trim();
+  const token = source.token;
 
   let payload;
   try {

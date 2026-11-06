@@ -18,8 +18,13 @@ export interface SocketClient {
   close(): void;
 }
 
-export function connectSocket(baseUrl: string, auth: { token: string; role: "customer" | "shopkeeper" }): SocketClient {
-  const ws = new WebSocket(`${baseUrl.replace(/^http/, "ws")}/socket.io/?EIO=4&transport=websocket`);
+/**
+ * `auth.token` may be left out to rely on a session cookie, which the caller supplies (with an Origin,
+ * as a browser would) through `headers`. Node's WebSocket accepts request headers as a second argument.
+ */
+export function connectSocket(baseUrl: string, auth: { token?: string; role: "customer" | "shopkeeper" }, headers?: Record<string, string>): SocketClient {
+  const url = `${baseUrl.replace(/^http/, "ws")}/socket.io/?EIO=4&transport=websocket`;
+  const ws = headers ? new WebSocket(url, { headers } as unknown as string[]) : new WebSocket(url);
   const received: SocketClient["received"] = [];
   const listeners: (() => void)[] = [];
 

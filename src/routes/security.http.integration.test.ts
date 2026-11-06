@@ -47,6 +47,9 @@ const PUBLIC_ROUTES = new Set([
   "POST /api/public/newsletter/unsubscribe",
   // second step of signing in: authenticated by the short-lived token from the password step; throttled per account
   "POST /api/customers/login/mfa",
+  // ends the browser session: needs no session on purpose (it only clears the caller's own cookie)
+  "POST /api/customers/logout",
+  "POST /api/shopkeeper/logout",
   "POST /api/shopkeeper/login/mfa",
   // monitors and error intake: no user data, bounded and rate limited
   "GET /healthz",

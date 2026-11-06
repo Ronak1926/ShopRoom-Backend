@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { verifyCustomerToken, verifyShopkeeperToken } from "../utils/jwt.js";
 import { isSessionActive } from "../services/session.service.js";
+import { anyTokens } from "./sessionToken.js";
 
 function tryVerify<T>(verify: (token: string) => T, token: string): T | null {
   try {
@@ -24,29 +25,30 @@ export async function requireAnyAuth(
   res: Response,
   next: NextFunction,
 ) {
-  const header = req.header("authorization");
-  if (!header || !header.toLowerCase().startsWith("bearer ")) {
-    res.status(401).json({ message: "Missing Authorization header" });
+  const found = anyTokens(req);
+  if ("rejected" in found) {
+    if (found.rejected === "cross-site") res.status(403).json({ message: "This request is not allowed from this origin" });
+    else res.status(401).json({ message: "Missing Authorization header" });
     return;
   }
-  const token = header.slice("bearer ".length).trim();
 
-  const customer = tryVerify(verifyCustomerToken, token);
-  if (customer) {
-    if (await isSessionActive("customer", customer.sub, customer.tv)) {
-      req.customerId = customer.sub;
+  // A header token is tried as either role; a cookie is already tied to its role.
+  for (const { token, role } of found.tokens) {
+    const customer = role === "shopkeeper" ? null : tryVerify(verifyCustomerToken, token);
+    if (customer) {
+      if (await isSessionActive("customer", customer.sub, customer.tv)) {
+        req.customerId = customer.sub;
+        next();
+        return;
+      }
+      continue;
+    }
+    const shopkeeper = role === "customer" ? null : tryVerify(verifyShopkeeperToken, token);
+    if (shopkeeper && (await isSessionActive("shopkeeper", shopkeeper.sub, shopkeeper.tv))) {
+      req.shopkeeperId = shopkeeper.sub;
       next();
       return;
     }
-    res.status(401).json({ message: "Invalid or expired token" });
-    return;
-  }
-
-  const shopkeeper = tryVerify(verifyShopkeeperToken, token);
-  if (shopkeeper && (await isSessionActive("shopkeeper", shopkeeper.sub, shopkeeper.tv))) {
-    req.shopkeeperId = shopkeeper.sub;
-    next();
-    return;
   }
   res.status(401).json({ message: "Invalid or expired token" });
 }

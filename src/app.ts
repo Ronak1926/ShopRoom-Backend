@@ -41,7 +41,9 @@ app.use(
       callback(null, !origin || allowed === null || allowed.includes(origin));
     },
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allowedHeaders: ["Authorization", "Content-Type", "Cache-Control", "If-None-Match"],
+    allowedHeaders: ["Authorization", "Content-Type", "Cache-Control", "If-None-Match", "X-Session-Mode"],
+    // The session cookie is sent on cross-origin calls from an allowed origin (the web app on another port or subdomain).
+    credentials: true,
     // Without this the page cannot read the file name of a download ("Download my data") from another origin.
     exposedHeaders: ["Content-Disposition"],
     maxAge: 600,

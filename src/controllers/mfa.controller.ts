@@ -12,6 +12,7 @@ import z from "zod";
 import type { AccountRole } from "../generated/client.js";
 import { prisma } from "../database/prisma.js";
 import { logger } from "../lib/logger.js";
+import { sendSession } from "../lib/sessionCookie.js";
 import { signCustomerToken, signShopkeeperToken, verifyMfaPendingToken } from "../utils/jwt.js";
 import { beginMfaSetup, checkSecondFactor, confirmMfaSetup, disableMfa, mfaStatus, regenerateRecoveryCodes } from "../services/mfa.service.js";
 import { confirmCustomerIdentity, confirmShopkeeperIdentity } from "../services/reauth.service.js";
@@ -171,10 +172,10 @@ export function mfaHandlers(role: AccountRole) {
       if (factor === "recovery") recordSecurityEvent(req, { type: "MFA_RECOVERY_USED", role, actorId: account.id });
 
       if (role === "CUSTOMER") {
-        res.json({ token: signCustomerToken(account.id, account.tokenVersion) });
+        sendSession(req, res, "customer", signCustomerToken(account.id, account.tokenVersion), { customerId: account.id });
       } else {
         const shop = account as { id: string; tokenVersion: number; shopName: string };
-        res.json({ token: signShopkeeperToken(shop.id, shop.tokenVersion), shopkeeperId: shop.id, shopName: shop.shopName });
+        sendSession(req, res, "shopkeeper", signShopkeeperToken(shop.id, shop.tokenVersion), { shopkeeperId: shop.id, shopName: shop.shopName });
       }
     } catch (err) {
       logger.error("Two-step sign-in", err);

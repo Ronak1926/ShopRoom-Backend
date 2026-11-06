@@ -20,6 +20,7 @@ import { confirmClientPayment } from "../services/paymentSettlement.service.js";
 import { handleRazorpayEvent, type WebhookOutcome } from "../services/paymentWebhook.service.js";
 import { registrationResult } from "../services/registration.service.js";
 import { signShopkeeperToken } from "../utils/jwt.js";
+import { sendSession } from "../lib/sessionCookie.js";
 import { PaymentError } from "../utils/paymentError.js";
 
 const razorpayId = z.string().regex(/^[A-Za-z0-9_]{1,64}$/);
@@ -73,9 +74,8 @@ export async function verifyPayment(req: Request, res: Response): Promise<void> 
       owner: { draftId: parsed.data.draftId },
     });
     const account = await registrationResult(shopkeeperId);
-    res.json({
+    sendSession(req, res, "shopkeeper", signShopkeeperToken(account.shopkeeperId, account.tokenVersion), {
       message: "Payment verified. Registration complete.",
-      token: signShopkeeperToken(account.shopkeeperId, account.tokenVersion),
       shopkeeperId: account.shopkeeperId,
       shopId: account.shopId,
       roomId: account.roomId,

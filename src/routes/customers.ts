@@ -18,6 +18,7 @@ import {
 import { exportCustomerDataHandler } from "../controllers/dataExport.controller.js";
 import { listCustomerSecurityEventsHandler } from "../controllers/securityEvents.controller.js";
 import { mfaHandlers } from "../controllers/mfa.controller.js";
+import { logoutHandler } from "../controllers/session.controller.js";
 import { requireCustomerAuth } from "../middleware/customerAuth.js";
 import {
   changePasswordHandler,
@@ -56,6 +57,7 @@ customersRouter.post("/register", registerLimiter, registerCustomerHandler);
 customersRouter.get("/me", requireCustomerAuth, meCustomerHandler);
 customersRouter.patch("/me", requireCustomerAuth, updateCustomerHandler);
 customersRouter.delete("/me", requireCustomerAuth, accountDeletionLimiter, deleteAccountHandler);
+customersRouter.post("/logout", logoutHandler("customer"));
 customersRouter.post("/me/logout-all", requireCustomerAuth, logoutAllHandler);
 customersRouter.post("/me/export", requireCustomerAuth, dataExportLimiter, exportCustomerDataHandler);
 customersRouter.get("/me/security-events", requireCustomerAuth, listCustomerSecurityEventsHandler);

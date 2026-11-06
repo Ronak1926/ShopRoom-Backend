@@ -56,6 +56,57 @@ describe("Socket.IO chat", { skip: !enabled }, () => {
     return { shop, members: members.map((m) => m.customerId) };
   }
 
+  describe("with the HttpOnly session cookie", () => {
+    const APP = "https://app.example.test";
+    const savedOrigins = process.env.CORS_ORIGINS;
+    afterEach(() => {
+      if (savedOrigins === undefined) delete process.env.CORS_ORIGINS;
+      else process.env.CORS_ORIGINS = savedOrigins;
+    });
+
+    async function cookieFor(customerId: string): Promise<string> {
+      const { hashPassword } = await import("../utils/password.js");
+      const row = await t.prisma.customer.update({ where: { id: customerId }, data: { passwordHash: await hashPassword("owner-pass-123") }, select: { email: true } });
+      const login = await t.call("POST", "/api/customers/login", { body: { email: row.email, password: "owner-pass-123" }, headers: { "X-Session-Mode": "cookie" } });
+      return login.headers.getSetCookie()[0].split(";")[0];
+    }
+
+    it("connects with the cookie alone, as a browser does, and can chat", async () => {
+      const { shop, members } = await roomWithMembers(2);
+      const cookie = await cookieFor(members[0]);
+      const viaCookie = connectSocket(url, { role: "customer" }, { Cookie: cookie, Origin: APP });
+      open.push(viaCookie);
+      await viaCookie.ready;
+      const other = await customerSocket(members[1]);
+      for (const client of [viaCookie, other]) client.emit("room:join", { roomId: shop.roomId });
+      await Promise.all([viaCookie, other].map((client) => client.waitFor("presence:update", (p) => p.onlineCustomerIds.length === 2)));
+      viaCookie.emit("message:send", { roomId: shop.roomId, text: "hello from a cookie session" });
+      assert.equal((await other.waitFor("message:new", (p) => p.text === "hello from a cookie session")).roomId, shop.roomId);
+    });
+
+    it("refuses a cookie-authenticated connection from another site, a bad cookie, the wrong role, and no credentials", async () => {
+      process.env.CORS_ORIGINS = APP;
+      const { members } = await roomWithMembers(1);
+      const cookie = await cookieFor(members[0]);
+      const attempts = [
+        connectSocket(url, { role: "customer" }, { Cookie: cookie, Origin: "https://evil.example.test" }),
+        connectSocket(url, { role: "customer" }, { Cookie: cookie.slice(0, -2) + "xx", Origin: APP }),
+        connectSocket(url, { role: "shopkeeper" }, { Cookie: cookie, Origin: APP }),
+        connectSocket(url, { role: "customer" }),
+      ];
+      open.push(...attempts);
+      const outcomes = await Promise.allSettled(attempts.map((a) => a.ready));
+      assert.deepEqual(outcomes.map((o) => o.status), ["rejected", "rejected", "rejected", "rejected"]);
+      const reasons = outcomes.map((o) => (o as PromiseRejectedResult).reason.message);
+      assert.ok(reasons.every((r) => /Unauthorized|Missing auth/.test(r)), `refused by the server, not by a network error: ${reasons}`);
+
+      // Control: the same cookie from the allowed origin does connect, so the refusals above are about the origin.
+      const allowed = connectSocket(url, { role: "customer" }, { Cookie: cookie, Origin: APP });
+      open.push(allowed);
+      await allowed.ready;
+    });
+  });
+
   describe("connecting", () => {
     it("accepts a valid session and refuses everything else", async () => {
       const { members } = await roomWithMembers(1);

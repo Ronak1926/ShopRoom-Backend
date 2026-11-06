@@ -15,6 +15,7 @@ import type { Server as HTTPServer } from "http";
 import { Server as SocketIOServer, type Socket } from "socket.io";
 import { allowedOrigins } from "../config/env.js";
 import { verifyCustomerToken, verifyShopkeeperToken } from "../utils/jwt.js";
+import { isAllowedOrigin, readSessionCookie } from "../lib/sessionCookie.js";
 import { prisma } from "../database/prisma.js";
 import { isSessionActive } from "../services/session.service.js";
 import { socketConnections } from "../lib/metrics.js";
@@ -196,6 +197,7 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
         const allowed = allowedOrigins();
         callback(null, !origin || allowed === null || allowed.includes(origin));
       },
+      credentials: true,
     },
     // Snappier stale-connection detection than the 25s/20s defaults, so a
     // closed tab clears its "online" presence in seconds, not tens of seconds.
@@ -204,10 +206,18 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
   });
 
   io.use(async (socket, next) => {
-    const { token, role } = socket.handshake.auth as {
+    const { token: given, role } = socket.handshake.auth as {
       token?: string;
       role?: "customer" | "shopkeeper";
     };
+    // A browser relying on its HttpOnly session cookie sends no token: read the cookie instead. WebSockets
+    // are not bound by CORS, so a cookie-authenticated connection must also come from an allowed origin.
+    const fromCookie = role === "customer" || role === "shopkeeper" ? readSessionCookie(socket.handshake, role) : null;
+    if (!given && fromCookie && !isAllowedOrigin(socket.handshake.headers.origin)) {
+      next(new Error("Unauthorized"));
+      return;
+    }
+    const token = given || fromCookie;
     if (!token || !role) {
       next(new Error("Missing auth"));
       return;

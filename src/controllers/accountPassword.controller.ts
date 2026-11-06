@@ -10,6 +10,7 @@ import z from "zod";
 import { signCustomerToken, signShopkeeperToken } from "../utils/jwt.js";
 import { newPasswordSchema } from "../utils/password.js";
 import { recordSecurityEvent } from "../services/securityEvent.service.js";
+import { sendSession } from "../lib/sessionCookie.js";
 import {
   changePassword,
   requestPasswordReset,
@@ -82,6 +83,6 @@ export function changePasswordHandler(role: ResetRole): RequestHandler {
     recordSecurityEvent(req, { type: "PASSWORD_CHANGED", role, actorId: accountId });
     // Every other session was signed out; hand back a fresh token so this one carries on.
     const token = role === "CUSTOMER" ? signCustomerToken(accountId, result.tokenVersion) : signShopkeeperToken(accountId, result.tokenVersion);
-    res.json({ message: "Password changed. Other devices have been signed out.", token });
+    sendSession(req, res, role === "CUSTOMER" ? "customer" : "shopkeeper", token, { message: "Password changed. Other devices have been signed out." });
   };
 }

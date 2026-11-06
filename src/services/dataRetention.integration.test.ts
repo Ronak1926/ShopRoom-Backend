@@ -135,6 +135,7 @@ describe("data retention", { skip: !enabled }, () => {
       stalePositions: 0,
       deliveryRecords: 0,
       inactiveDevices: 0,
+      securityEvents: 0,
     });
   });
 });

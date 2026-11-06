@@ -3,6 +3,7 @@ import z from "zod";
 import { parseBody } from "../utils/validate.js";
 import { signCustomerToken, signMfaPendingToken } from "../utils/jwt.js";
 import { isMfaEnabled } from "../services/mfa.service.js";
+import { clearSessionCookie, sendSession } from "../lib/sessionCookie.js";
 import {
   deleteCustomerAccount,
   getCustomerById,
@@ -99,10 +100,7 @@ export async function registerCustomerHandler(req: Request, res: Response) {
   }
 
   const token = signCustomerToken(result.customer.id, result.tokenVersion);
-  return res.json({
-    token,
-    cusomer: result.customer,
-  });
+  return sendSession(req, res, "customer", token, { customerId: result.customer.id, cusomer: result.customer });
 }
 
 export async function meCustomerHandler(req: Request, res: Response) {
@@ -190,9 +188,7 @@ export async function loginCustomerHandler(req: Request, res: Response) {
   }
   recordSecurityEvent(req, { type: "LOGIN_SUCCESS", role: "CUSTOMER", actorId: result.customer.id, detail: { method: "password" } });
   const token = signCustomerToken(result.customer.id, result.tokenVersion);
-  return res.json({
-    token,
-  });
+  return sendSession(req, res, "customer", token, { customerId: result.customer.id });
 }
 
 export async function googleAuthCustomerHandler(req: Request, res: Response) {
@@ -226,7 +222,7 @@ export async function googleAuthCustomerHandler(req: Request, res: Response) {
   }
   recordSecurityEvent(req, { type: "LOGIN_SUCCESS", role: "CUSTOMER", actorId: result.customer.id, detail: { method: "google" } });
   const token = signCustomerToken(result.customer.id, result.tokenVersion);
-  return res.json({ token, customer: result.customer });
+  return sendSession(req, res, "customer", token, { customerId: result.customer.id, customer: result.customer });
 }
 
 // ─── POST /api/customers/me/logout-all ────────────────────────────────────────
@@ -236,6 +232,7 @@ export async function logoutAllHandler(req: Request, res: Response) {
   await revokeSessions("customer", req.customerId!);
   recordSecurityEvent(req, { type: "SESSIONS_REVOKED", role: "CUSTOMER", actorId: req.customerId });
   disconnectViewer(req.customerId!);
+  clearSessionCookie(res, "customer");
   return res.json({ message: "Signed out everywhere" });
 }
 

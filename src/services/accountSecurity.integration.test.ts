@@ -102,9 +102,11 @@ describe("message scoping and account linking", { skip: !enabled }, () => {
       assert.equal(row.firebaseUid, "uid-victim");
       assert.equal(await sessions.isSessionActive("customer", row.id, squatterSession), false, "their session is revoked");
       assert.equal(await sessions.isSessionActive("customer", row.id, google.tokenVersion), true);
+      // The failure names the account that was tried (the sign-in audit log records it against that account).
       assert.deepEqual(await customers.loginCustomer({ email: "victim@example.test", password: "squatter-password" }), {
         ok: false,
         reason: "INVALID_CREDENTIALS",
+        customerId: google.customer.id,
       });
     });
 

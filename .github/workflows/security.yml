@@ -33,7 +33,11 @@ jobs:
       - name: Scan history for committed secrets
         run: |
           pattern='(BEGIN [A-Z ]*PRIVATE KEY|AKIA[0-9A-Z]{16}|sk_live_[A-Za-z0-9]{10,}|rzp_live_[A-Za-z0-9]{10,}|AIza[0-9A-Za-z_-]{35}|ghp_[A-Za-z0-9]{30,})'
-          if git log --all -p -G"$pattern" --pretty=format:%h -- . ':!pnpm-lock.yaml' | grep -q .; then
-            echo "A secret-shaped string was committed. Rotate it and remove it from history."
+          # Known fakes: the PEM placeholder in .env.example and the live-looking key used to test the production env guard.
+          allowed='YOUR_KEY_HERE|rzp_live_abc123XYZ789'
+          hits=$(git log --all -p -G"$pattern" --pretty=format: -- . ':!pnpm-lock.yaml' | grep -E '^\+' | grep -v '^+++' | grep -E "$pattern" | grep -v -E "$allowed" | wc -l)
+          if [ "$hits" -gt 0 ]; then
+            echo "$hits added line(s) look like a secret. Rotate it and remove it from history."
+            echo "Find them with: git log --all -p -G'<pattern above>' (the values are not printed here)."
             exit 1
           fi

@@ -4,7 +4,6 @@ import { parseBody } from "../utils/validate.js";
 import { signCustomerToken } from "../utils/jwt.js";
 import {
   deleteCustomerAccount,
-  getCustomerAuthFactors,
   getCustomerById,
   getJoinedRooms,
   googleAuthCustomer,
@@ -15,11 +14,9 @@ import {
 } from "../services/customers.service.js";
 import { revokeSessions } from "../services/session.service.js";
 import { disconnectViewer, removeViewerFromRoom } from "../realtime/socket.js";
-import { newPasswordSchema, verifyPassword } from "../utils/password.js";
+import { newPasswordSchema } from "../utils/password.js";
 import { firebaseAuth } from "../lib/firebaseAdmin.js";
-
-/** A Google sign-in older than this can't authorise deleting the account. */
-const REAUTH_WINDOW_SECONDS = 5 * 60;
+import { confirmCustomerIdentity } from "../services/reauth.service.js";
 
 const registerCustomerSchema = z
   .object({
@@ -247,26 +244,11 @@ export async function deleteAccountHandler(req: Request, res: Response) {
     return validationError(res, parsed.error);
   }
 
-  const factors = await getCustomerAuthFactors(customerId);
-  if (!factors) {
+  const proof = await confirmCustomerIdentity(customerId, parsed.data);
+  if (proof === "not-found") {
     return res.status(404).json({ message: "Customer not found" });
   }
-
-  let confirmed = false;
-  if (factors.passwordHash) {
-    confirmed =
-      typeof parsed.data.password === "string" &&
-      (await verifyPassword(parsed.data.password, factors.passwordHash));
-  } else if (parsed.data.idToken && factors.firebaseUid) {
-    try {
-      const decoded = await firebaseAuth.verifyIdToken(parsed.data.idToken);
-      const age = Date.now() / 1000 - decoded.auth_time;
-      confirmed = decoded.uid === factors.firebaseUid && age >= 0 && age <= REAUTH_WINDOW_SECONDS;
-    } catch {
-      confirmed = false;
-    }
-  }
-  if (!confirmed) {
+  if (proof !== "confirmed") {
     return res.status(403).json({ message: "Could not confirm your identity" });
   }
 

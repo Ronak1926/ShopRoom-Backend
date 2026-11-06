@@ -17,6 +17,7 @@ import {
   deleteShopkeeperAccountHandler,
 } from "../controllers/shopkeeper.controller.js";
 import { createPaymentOrder, handleWebhook, verifyPayment } from "../controllers/payment.controller.js";
+import { exportShopkeeperDataHandler } from "../controllers/dataExport.controller.js";
 import { requireShopkeeperAuth } from "../middleware/shopkeeperAuth.js";
 import {
   changePasswordHandler,
@@ -26,6 +27,7 @@ import {
 import { createRenewalOrderHandler, getBillingHandler, verifyRenewalHandler } from "../controllers/billing.controller.js";
 import {
   accountDeletionLimiter,
+  dataExportLimiter,
   changePasswordLimiter,
   draftInitAccountLimiter,
   draftLimiter,
@@ -99,6 +101,7 @@ shopkeeperRouter.get("/billing", requireShopkeeperAuth, getBillingHandler);
 shopkeeperRouter.post("/billing/order", requireShopkeeperAuth, paymentLimiter, createRenewalOrderHandler);
 shopkeeperRouter.post("/billing/verify", requireShopkeeperAuth, paymentLimiter, verifyRenewalHandler);
 shopkeeperRouter.post("/logout-all", requireShopkeeperAuth, logoutAllShopkeeperHandler);
+shopkeeperRouter.post("/me/export", requireShopkeeperAuth, dataExportLimiter, exportShopkeeperDataHandler);
 shopkeeperRouter.delete(
   "/me",
   requireShopkeeperAuth,

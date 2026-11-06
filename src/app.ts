@@ -42,6 +42,8 @@ app.use(
     },
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     allowedHeaders: ["Authorization", "Content-Type", "Cache-Control", "If-None-Match"],
+    // Without this the page cannot read the file name of a download ("Download my data") from another origin.
+    exposedHeaders: ["Content-Disposition"],
     maxAge: 600,
   }),
 );

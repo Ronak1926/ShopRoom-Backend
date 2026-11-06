@@ -43,6 +43,8 @@ const PUBLIC_ROUTES = new Set([
   // public site forms: bounded input, rate limited, nothing about any account is revealed
   "POST /api/public/contact",
   "POST /api/public/newsletter",
+  // authenticated by the signed token in the emailed link (an HMAC of the address); rate limited
+  "POST /api/public/newsletter/unsubscribe",
   // monitors and error intake: no user data, bounded and rate limited
   "GET /healthz",
   "GET /readyz",

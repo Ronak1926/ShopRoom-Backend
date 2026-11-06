@@ -173,6 +173,14 @@ export const accountDeletionLimiter = limiter(
   (req) => `delete:${req.customerId ?? req.shopkeeperId ?? clientIp(req)}`,
 );
 
+export const dataExportLimiter = limiter(
+  "data-export",
+  60 * MINUTE,
+  5,
+  "You've downloaded your data several times already. Please try again later.",
+  (req) => `export:${req.customerId ?? req.shopkeeperId ?? clientIp(req)}`,
+);
+
 export const contactLimiter = limiter(
   "contact",
   60 * MINUTE,

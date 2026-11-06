@@ -15,6 +15,7 @@ import {
   registerDeviceHandler,
   unregisterDeviceHandler,
 } from "../controllers/customerDevice.controller.js";
+import { exportCustomerDataHandler } from "../controllers/dataExport.controller.js";
 import { requireCustomerAuth } from "../middleware/customerAuth.js";
 import {
   changePasswordHandler,
@@ -23,6 +24,7 @@ import {
 } from "../controllers/accountPassword.controller.js";
 import {
   accountDeletionLimiter,
+  dataExportLimiter,
   changePasswordLimiter,
   forgotPasswordAccountLimiter,
   forgotPasswordIpLimiter,
@@ -50,6 +52,7 @@ customersRouter.get("/me", requireCustomerAuth, meCustomerHandler);
 customersRouter.patch("/me", requireCustomerAuth, updateCustomerHandler);
 customersRouter.delete("/me", requireCustomerAuth, accountDeletionLimiter, deleteAccountHandler);
 customersRouter.post("/me/logout-all", requireCustomerAuth, logoutAllHandler);
+customersRouter.post("/me/export", requireCustomerAuth, dataExportLimiter, exportCustomerDataHandler);
 customersRouter.get("/me/rooms", requireCustomerAuth, meRoomsHandler);
 customersRouter.put("/me/location", requireCustomerAuth, locationLimiter, reportLocationHandler);
 customersRouter.post("/me/devices", requireCustomerAuth, registerDeviceHandler);

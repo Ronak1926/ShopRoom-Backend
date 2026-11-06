@@ -20,6 +20,7 @@ import { createPaymentOrder, handleWebhook, verifyPayment } from "../controllers
 import { exportShopkeeperDataHandler } from "../controllers/dataExport.controller.js";
 import { listShopkeeperSecurityEventsHandler } from "../controllers/securityEvents.controller.js";
 import { mfaHandlers } from "../controllers/mfa.controller.js";
+import { getInvoiceHandler, setGstinHandler } from "../controllers/invoice.controller.js";
 import { requireShopkeeperAuth } from "../middleware/shopkeeperAuth.js";
 import {
   changePasswordHandler,
@@ -103,6 +104,8 @@ shopkeeperRouter.post("/forgot-password", forgotPasswordIpLimiter, forgotPasswor
 shopkeeperRouter.post("/reset-password", resetPasswordLimiter, resetPasswordHandler("SHOPKEEPER"));
 shopkeeperRouter.patch("/me/password", requireShopkeeperAuth, changePasswordLimiter, changePasswordHandler("SHOPKEEPER"));
 shopkeeperRouter.get("/billing", requireShopkeeperAuth, getBillingHandler);
+shopkeeperRouter.get("/billing/invoices/:paymentId", requireShopkeeperAuth, getInvoiceHandler);
+shopkeeperRouter.put("/billing/gstin", requireShopkeeperAuth, setGstinHandler);
 shopkeeperRouter.post("/billing/order", requireShopkeeperAuth, paymentLimiter, createRenewalOrderHandler);
 shopkeeperRouter.post("/billing/verify", requireShopkeeperAuth, paymentLimiter, verifyRenewalHandler);
 shopkeeperRouter.post("/logout-all", requireShopkeeperAuth, logoutAllShopkeeperHandler);

@@ -8,6 +8,8 @@
  * present, and the integrations also fail closed on their own.
  */
 
+import { invoiceConfigIsPartial } from "./invoice.js";
+
 type Env = Record<string, string | undefined>;
 
 const MIN_JWT_SECRET_LENGTH = 32;
@@ -52,6 +54,9 @@ const RAZORPAY_KEY_ID_PATTERN = /^rzp_(live|test)_[A-Za-z0-9]{6,}$/;
 /** Settings that work but are probably a mistake. The server still starts; the log says why it should not. */
 export function productionConfigWarnings(env: Env = process.env): string[] {
   const warnings: string[] = [];
+  if (invoiceConfigIsPartial(env)) {
+    warnings.push("Some INVOICE_* settings are set but they do not make a valid GST invoicing setup (name, GSTIN, address, SAC and GST rate are all needed, and the GSTIN must be valid). Invoices stay off.");
+  }
   if (isProduction(env) && env.RAZORPAY_KEY_ID?.trim().startsWith("rzp_test_")) {
     warnings.push("RAZORPAY_KEY_ID is a TEST key: payments will succeed without any real money moving. Use a rzp_live_ key for real customers.");
   }

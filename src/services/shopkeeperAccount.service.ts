@@ -2,6 +2,7 @@
  * services/shopkeeperAccount.service.ts — Erasing a shopkeeper account.
  */
 
+import { Prisma } from "../generated/client.js";
 import { prisma } from "../database/prisma.js";
 import { deleteImages, publicIdFromUrl } from "../lib/cloudinary.js";
 import { closeRoom } from "../realtime/socket.js";
@@ -18,7 +19,7 @@ import { logger } from "../lib/logger.js";
  * send still points at them.
  */
 export async function deleteShopkeeperAccount(shopkeeperId: string): Promise<void> {
-  const [shop, assets] = await Promise.all([
+  const [shop, assets, invoices] = await Promise.all([
     prisma.shop.findUnique({
       where: { ownerId: shopkeeperId },
       select: { logoUrl: true, room: { select: { id: true, coverUrl: true } } },
@@ -27,9 +28,18 @@ export async function deleteShopkeeperAccount(shopkeeperId: string): Promise<voi
       where: { shopkeeperId },
       select: { cloudinaryPublicId: true },
     }),
+    prisma.planPayment.findMany({
+      where: { shopkeeperId, invoiceNumber: { not: null }, invoiceSnapshot: { not: Prisma.DbNull } },
+      select: { invoiceNumber: true, invoiceSnapshot: true, createdAt: true },
+    }),
   ]);
 
   await prisma.$transaction([
+    // Issued tax invoices are records the business may have to keep: copy them out before the account goes.
+    prisma.invoiceArchive.createMany({
+      data: invoices.map((i) => ({ invoiceNumber: i.invoiceNumber as string, snapshot: i.invoiceSnapshot as Prisma.InputJsonValue, issuedAt: i.createdAt })),
+      skipDuplicates: true,
+    }),
     prisma.notificationSchedule.deleteMany({ where: { shopkeeperId } }),
     prisma.passwordResetToken.deleteMany({ where: { role: "SHOPKEEPER", accountId: shopkeeperId } }),
     prisma.securityEvent.deleteMany({ where: { actorRole: "SHOPKEEPER", actorId: shopkeeperId } }),

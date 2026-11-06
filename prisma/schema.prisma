@@ -55,8 +55,30 @@ model PlanPayment {
   createdAt         DateTime           @default(now())
   /// Set when the money was returned from the Razorpay dashboard; the plan time it bought was taken back.
   refundedAt        DateTime?
+  /// GST tax invoice, issued the first time it is asked for. The snapshot is exactly what was printed.
+  invoiceNumber     String?            @unique
+  invoiceSnapshot   Json?
+  invoicedAt        DateTime?
 
   @@index([shopkeeperId, createdAt(sort: Desc)])
+}
+
+/// Last invoice number used in each financial year ("2026-27"). Incremented under a row lock so numbers never repeat or skip.
+model InvoiceCounter {
+  financialYear String @id
+  lastNumber    Int
+}
+
+/// Tax invoices that outlive the account they were issued to. Deleting an account erases its data, but
+/// an invoice that has been issued is a tax record the business may have to keep, so a copy of its
+/// snapshot is kept here with no link to the account. Nothing reads this table in the app.
+model InvoiceArchive {
+  invoiceNumber String   @id
+  snapshot      Json
+  issuedAt      DateTime
+  archivedAt    DateTime @default(now())
+
+  @@index([issuedAt])
 }
 
 enum PaymentOrderStatus {
@@ -262,6 +284,8 @@ model Shopkeeper {
   razorpayPaymentId String?  @unique // Razorpay payment ID (pay_xxx); unique so one payment can only ever buy one account
   /// Bumped to invalidate every session issued before it (sign out everywhere).
   tokenVersion      Int      @default(0)
+  /// Optional GSTIN printed on invoices as the buyer's.
+  gstin             String?
   // ── Stripe (commented out — replaced by Razorpay) ──────────────────────────
   // stripePaymentId String?
   createdAt         DateTime @default(now())

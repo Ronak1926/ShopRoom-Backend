@@ -10,6 +10,7 @@
  */
 
 import { prisma } from "../database/prisma.js";
+import { invoiceSeller } from "../config/invoice.js";
 import { confirmClientPayment } from "./paymentSettlement.service.js";
 import { PLANS, PLAN_IDS, type PlanId } from "./plans.js";
 
@@ -20,6 +21,10 @@ export interface BillingView {
   /** Whole days left, 0 when expired. */
   daysLeft: number;
   plans: { id: PlanId; label: string; priceInr: number; days: number }[];
+  /** The GSTIN printed as the buyer's on new invoices. */
+  gstin: string | null;
+  /** True when the business has set up GST invoicing, so payments can have an invoice. */
+  invoicesEnabled: boolean;
   payments: { id: string; purpose: "REGISTRATION" | "RENEWAL"; planType: string; amountInr: number; paidAt: string; refunded: boolean }[];
 }
 
@@ -35,7 +40,7 @@ export async function getPlanStatus(shopkeeperId: string): Promise<{ planType: s
 
 export async function getBilling(shopkeeperId: string): Promise<BillingView> {
   const [owner, payments] = await Promise.all([
-    prisma.shopkeeper.findUniqueOrThrow({ where: { id: shopkeeperId }, select: { planType: true, planExpiresAt: true } }),
+    prisma.shopkeeper.findUniqueOrThrow({ where: { id: shopkeeperId }, select: { planType: true, planExpiresAt: true, gstin: true } }),
     prisma.planPayment.findMany({
       where: { shopkeeperId },
       orderBy: { createdAt: "desc" },
@@ -50,6 +55,8 @@ export async function getBilling(shopkeeperId: string): Promise<BillingView> {
     planExpiresAt: owner.planExpiresAt.toISOString(),
     active: isPlanActive(owner.planExpiresAt, now),
     daysLeft: Math.ceil(msLeft / 86_400_000),
+    gstin: owner.gstin,
+    invoicesEnabled: invoiceSeller() !== null,
     plans: PLAN_IDS.map((id) => ({ id, label: PLANS[id].label, priceInr: PLANS[id].amount / 100, days: PLANS[id].days })),
     payments: payments.map((p) => ({
       id: p.id,

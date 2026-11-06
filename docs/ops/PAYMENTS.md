@@ -94,6 +94,25 @@ This is a payment receipt, not a GST tax invoice. See "Not covered yet".
 SELECT id, "fulfilledAt" FROM "PaymentOrder" WHERE status = 'FULFILLED' AND "receiptSentAt" IS NULL ORDER BY "fulfilledAt";
 ```
 
+## GST tax invoices
+
+Each payment can have a tax invoice, shown to the shopkeeper as an "Invoice" link in their billing history (printable, "Print or save as PDF"). Invoicing is **off until the business configures it**: `INVOICE_SELLER_NAME`, `INVOICE_SELLER_GSTIN` (checksum-validated), `INVOICE_SELLER_ADDRESS`, `INVOICE_SAC` and `INVOICE_GST_RATE` (optional `INVOICE_PREFIX`, default `SR`). The code assumes none of these: the GSTIN, SAC code and rate are yours and should be confirmed with your accountant. A half-filled setup logs a warning at start-up and issues nothing.
+
+How it behaves:
+
+- **Prices are GST-inclusive.** The amount a customer pays is the invoice total; the tax is taken out of it (taxable value = total ÷ (1 + rate)).
+- **CGST + SGST or IGST.** If the buyer's place of supply is the seller's state, the tax is split into CGST and SGST halves (an odd paisa goes to SGST); otherwise it is IGST. The place of supply is the state in the buyer's GSTIN if they added one, else their shop's state name. A state name we cannot read (for example "MH") is **not guessed**: the invoice shows IGST and no place-of-supply code.
+- **Numbers.** `SR/2026-27/000001`: sequential per Indian financial year (April to March, by the payment's date in India), assigned the first time an invoice is requested, under a row lock so two invoices never share a number and a number is only used if its invoice is saved. Because numbers are assigned on first request, an invoice nobody opens has no number yet.
+- **Frozen.** The invoice is saved as a snapshot when issued; changing the shop's address, GSTIN or the configured rate afterwards does not alter it.
+- **Buyer GSTIN.** Optional, set by the shopkeeper on the billing page, validated (format, state code and check character). It affects invoices issued after it is saved.
+- **Refunds.** An invoice for a refunded payment still exists and is marked "This payment was refunded". **Credit notes are not generated**; if your accounting needs them, issue them outside this system.
+
+```sql
+-- Invoices issued, and what is left to issue
+SELECT "invoiceNumber", "invoicedAt", amount / 100 AS rupees FROM "PlanPayment" WHERE "invoiceNumber" IS NOT NULL ORDER BY "invoiceNumber";
+SELECT * FROM "InvoiceCounter";
+```
+
 ## Operating it
 
 Orders that need a person:
@@ -117,4 +136,4 @@ Metrics and alerts: `razorpay_webhook_events_total{result}`, `payment_verificati
 
 ## Not covered yet
 
-GST tax invoices (they need the business's GSTIN, invoice numbering and the buyer's billing details; the receipt email is not one) and partial refunds.
+Credit notes for refunded invoices, partial refunds, and e-invoicing (IRN/QR) for businesses above the government's e-invoice threshold; the invoices here are not e-invoices.

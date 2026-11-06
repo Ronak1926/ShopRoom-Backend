@@ -143,6 +143,7 @@ export async function exportShopkeeperData(shopkeeperId: string) {
         email: true,
         ownerName: true,
         phoneNumber: true,
+        gstin: true,
         planType: true,
         planExpiresAt: true,
         createdAt: true,
@@ -168,7 +169,7 @@ export async function exportShopkeeperData(shopkeeperId: string) {
     }),
     prisma.planPayment.findMany({
       where: { shopkeeperId },
-      select: { purpose: true, planType: true, amount: true, razorpayOrderId: true, razorpayPaymentId: true, createdAt: true },
+      select: { purpose: true, planType: true, amount: true, razorpayOrderId: true, razorpayPaymentId: true, createdAt: true, invoiceNumber: true, refundedAt: true },
       orderBy: { createdAt: "asc" },
       take: LIST_LIMIT + 1,
     }),
@@ -232,6 +233,7 @@ export async function exportShopkeeperData(shopkeeperId: string) {
       email: shopkeeper.email,
       ownerName: shopkeeper.ownerName,
       phoneNumber: shopkeeper.phoneNumber,
+      gstin: shopkeeper.gstin,
       createdAt: shopkeeper.createdAt,
     },
     shop: shopkeeper.shop
@@ -259,6 +261,8 @@ export async function exportShopkeeperData(shopkeeperId: string) {
       razorpayOrderId: p.razorpayOrderId,
       razorpayPaymentId: p.razorpayPaymentId,
       paidAt: p.createdAt,
+      invoiceNumber: p.invoiceNumber,
+      refundedAt: p.refundedAt,
     })),
     notificationPreferences: shopkeeper.notificationPreference?.settings ?? null,
     notificationDesigns: take("notificationDesigns", designs),

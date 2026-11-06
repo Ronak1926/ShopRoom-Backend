@@ -98,6 +98,8 @@ model PaymentOrder {
   @@index([draftId, planType, status])
   @@index([shopkeeperId])
   @@index([status, createdAt])
+  // The daily receipt sweep looks for fulfilled orders in a recent window.
+  @@index([status, fulfilledAt])
 }
 
 /// A shopkeeper's notification defaults. The server enforces quietFrom, quietTo, weekendSending
@@ -352,6 +354,9 @@ model MessageReaction {
 
   @@unique([messageId, viewerKey])
   @@index([messageId])
+  // Foreign keys that cascade on account deletion and are read by the data export.
+  @@index([customerId])
+  @@index([shopkeeperId])
 }
 
 /// "Delete for me" — hides a single message from one participant's own view
@@ -386,6 +391,9 @@ model RoomViewerState {
 
   @@unique([roomId, viewerKey])
   @@index([roomId, lastReadAt])
+  // Foreign keys that cascade on account deletion and are read by the data export.
+  @@index([customerId])
+  @@index([shopkeeperId])
 }
 
 // ─── Customizable Notifications ─────────────────────────────────────────────────
@@ -468,6 +476,7 @@ model NotificationDesign {
   @@index([shopkeeperId])
   @@index([shopkeeperId, isArchived, updatedAt(sort: Desc)])
   @@index([categoryId])
+  @@index([sourceTemplateId])
 }
 
 /// Immutable snapshot for restore/rollback. Written on explicit save-version.

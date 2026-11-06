@@ -100,6 +100,9 @@ describe("Socket.IO chat", { skip: !enabled }, () => {
       for (const client of [alice, bob]) client.emit("room:join", { roomId: shop.roomId });
       outsider.emit("room:join", { roomId: shop.roomId });
       await outsider.waitFor("error", (p) => p.message === "Access denied");
+      // Joining checks the database first, so it completes some time after the emit. A broadcast that
+      // goes out before a member has joined is rightly not delivered to them: wait until both are in.
+      await Promise.all([alice, bob].map((client) => client.waitFor("presence:update", (p) => p.onlineCustomerIds.length === 2)));
 
       alice.emit("message:send", { roomId: shop.roomId, text: "hello room" });
       const delivered = await bob.waitFor("message:new", (p) => p.text === "hello room");

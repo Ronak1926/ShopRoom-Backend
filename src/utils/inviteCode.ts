@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import { logger } from "../lib/logger.js";
 
 /**
@@ -27,16 +28,12 @@ type TxClient = Omit<
 >;
 
 /**
- * Generates a cryptographically random invite code character.
- *
- * Uses Math.random() — sufficient for non-security-critical invite codes.
- * If codes ever need to be unguessable secrets, swap in crypto.randomInt.
+ * A random invite code. The code is what lets someone into a room, so it comes from the
+ * operating system's CSPRNG (randomInt is unbiased) rather than Math.random(), whose output
+ * can be predicted from a few observed values.
  */
 function randomCode(): string {
-  return Array.from(
-    { length: CODE_LENGTH },
-    () => CHARS[Math.floor(Math.random() * CHARS.length)],
-  ).join("");
+  return Array.from({ length: CODE_LENGTH }, () => CHARS[randomInt(CHARS.length)]).join("");
 }
 
 /**

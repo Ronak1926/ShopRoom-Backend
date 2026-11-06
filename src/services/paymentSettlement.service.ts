@@ -21,6 +21,7 @@ import { paymentRefunds, paymentVerifications } from "../lib/metrics.js";
 import { refundPayment, verifyPaymentSignature } from "../lib/razorpay.js";
 import { PaymentError } from "../utils/paymentError.js";
 import { raiseAlert, recordPaymentFailure } from "./alerting.service.js";
+import { sendReceiptInBackground } from "./paymentReceipt.service.js";
 import { isPlanId, planEndsAt } from "./plans.js";
 import { createAccountFromDraft } from "./registration.service.js";
 
@@ -148,6 +149,8 @@ async function refundSurplusPayment(order: PaymentOrder, paymentId: string): Pro
 export async function settlePayment(order: PaymentOrder, paymentId: string): Promise<Settlement> {
   const result = await grantOrRecoverFromEmailClash(order, paymentId);
   const settled = result.order;
+  // Only the call that actually granted the purchase sends the receipt; repeats and races find it done.
+  if (result.kind === "granted") sendReceiptInBackground(settled.id);
 
   if (settled.razorpayPaymentId && settled.razorpayPaymentId !== paymentId) await refundSurplusPayment(settled, paymentId);
 

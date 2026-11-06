@@ -6,6 +6,7 @@
 
 import { prisma } from "../database/prisma.js";
 import { logger } from "../lib/logger.js";
+import { retryUnsentReceipts } from "./paymentReceipt.service.js";
 import { retryPendingRefunds } from "./paymentSettlement.service.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -86,6 +87,12 @@ async function runOnce(): Promise<void> {
     if (refunded > 0) logger.info("Pending refunds completed", { refunded });
   } catch (err) {
     logger.error("Refund retry failed", err);
+  }
+  try {
+    const sent = await retryUnsentReceipts();
+    if (sent > 0) logger.info("Late payment receipts sent", { sent });
+  } catch (err) {
+    logger.error("Receipt retry failed", err);
   }
 }
 

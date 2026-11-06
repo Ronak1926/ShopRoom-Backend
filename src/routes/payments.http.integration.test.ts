@@ -6,7 +6,8 @@
 
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { after, before, beforeEach, describe, it } from "node:test";
+import nodemailer from "nodemailer";
+import { after, afterEach, before, beforeEach, describe, it, mock } from "node:test";
 import { setRazorpayClientForTests, type RazorpayApi } from "../lib/razorpay.js";
 import { createShop, integrationConfigured, resetDatabase } from "../test/integration.js";
 import { startTestApp, type TestApp } from "../test/http.js";
@@ -56,6 +57,7 @@ describe("payments end to end", { skip: !enabled }, () => {
   // The jobs read DATABASE_URL when first imported, which the harness sets in startTestApp().
   let purgeExpiredData: typeof import("../services/dataRetention.service.js").purgeExpiredData;
   let retryPendingRefunds: typeof import("../services/paymentSettlement.service.js").retryPendingRefunds;
+  let retryUnsentReceipts: typeof import("../services/paymentReceipt.service.js").retryUnsentReceipts;
   const saved: Record<string, string | undefined> = {};
 
   before(async () => {
@@ -68,6 +70,7 @@ describe("payments end to end", { skip: !enabled }, () => {
     t = await startTestApp();
     ({ purgeExpiredData } = await import("../services/dataRetention.service.js"));
     ({ retryPendingRefunds } = await import("../services/paymentSettlement.service.js"));
+    ({ retryUnsentReceipts } = await import("../services/paymentReceipt.service.js"));
   });
   after(async () => {
     setRazorpayClientForTests(null);
@@ -590,6 +593,132 @@ describe("payments end to end", { skip: !enabled }, () => {
       const renewal = await renewalOrder(s);
       const draft = await draftReadyToPay();
       assert.equal((await confirm(draft.draftId, renewal.orderId, "pay_X2")).status, 400);
+    });
+  });
+
+  // ── receipts ───────────────────────────────────────────────────────────────
+
+  describe("payment receipts", () => {
+    type Mail = { to: string; subject: string; text: string; html: string };
+    let mails: Mail[];
+    let mailFailure: Error | null;
+    const mailEnv = { SMTP_HOST: "smtp.test", SMTP_USER: "from@example.test" };
+    const savedMailEnv: Record<string, string | undefined> = {};
+
+    before(() => {
+      for (const name of Object.keys(mailEnv)) savedMailEnv[name] = process.env[name];
+    });
+    after(() => {
+      for (const [name, value] of Object.entries(savedMailEnv)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    });
+    afterEach(() => mock.restoreAll());
+    beforeEach(() => {
+      mails = [];
+      mailFailure = null;
+      Object.assign(process.env, mailEnv);
+      mock.method(nodemailer, "createTransport", () => ({
+        sendMail: async (message: Mail) => {
+          if (mailFailure) throw mailFailure;
+          mails.push(message);
+        },
+      }));
+    });
+
+    const waitForMails = async (count: number) => {
+      for (let i = 0; i < 150 && mails.length < count; i += 1) await new Promise((r) => setTimeout(r, 20));
+    };
+    const settleDown = () => new Promise((r) => setTimeout(r, 150));
+    const receiptSentAt = async (razorpayOrderId: string) => (await order(razorpayOrderId)).receiptSentAt;
+
+    it("emails the new shopkeeper once with what they paid, however many times the payment is confirmed", async () => {
+      const o = await orderFor("2m");
+      await Promise.all([
+        confirm(o.draftId, o.orderId, "pay_Rc1"),
+        webhook(paidEvent({ orderId: o.orderId, paymentId: "pay_Rc1", amount: o.amount })),
+        confirm(o.draftId, o.orderId, "pay_Rc1"),
+      ]);
+      await waitForMails(1);
+      await settleDown();
+      assert.equal(mails.length, 1, "exactly one receipt");
+      assert.equal(mails[0].to, o.email);
+      assert.match(mails[0].subject, /599\.00/);
+      for (const part of ["2 Months", "599.00", "pay_Rc1", "Sunrise Textiles"]) assert.ok(mails[0].text.includes(part), `text mentions ${part}`);
+      assert.ok(mails[0].html.includes("pay_Rc1"));
+      assert.ok(await receiptSentAt(o.orderId), "the order remembers it was sent");
+      assert.equal((await webhook(paidEvent({ orderId: o.orderId, paymentId: "pay_Rc1", amount: o.amount }))).status, 200);
+      await settleDown();
+      assert.equal(mails.length, 1, "a redelivered webhook does not send another");
+    });
+
+    it("emails a renewal, with the shop's name made safe for HTML", async () => {
+      const made = await createShop(t.prisma, { planType: "1m" });
+      await t.prisma.shopkeeper.update({ where: { id: made.shopkeeperId }, data: { shopName: "Raj & <Sons>", planExpiresAt: new Date(Date.now() + 5 * DAY_MS) } });
+      const token = t.shopkeeperToken(made.shopkeeperId);
+      const placed = (await t.call("POST", "/api/shopkeeper/billing/order", { token, body: { planType: "3m" } })).json.data as { orderId: string };
+      const res = await t.call("POST", "/api/shopkeeper/billing/verify", {
+        token,
+        body: { razorpayOrderId: placed.orderId, razorpayPaymentId: "pay_RcRn1", razorpaySignature: hmac(KEY_SECRET, `${placed.orderId}|pay_RcRn1`) },
+      });
+      assert.equal(res.status, 200);
+      await waitForMails(1);
+      assert.equal(mails.length, 1);
+      assert.match(mails[0].text, /renewal, 3 Months plan/);
+      assert.ok(mails[0].text.includes("899.00"));
+      assert.ok(mails[0].html.includes("Raj &amp; &lt;Sons&gt;"), "escaped in the HTML");
+      assert.ok(!mails[0].html.includes("<Sons>"));
+    });
+
+    it("never lets a mail failure touch the payment, and the daily sweep sends it later", async () => {
+      mailFailure = new Error("SMTP down");
+      const o = await orderFor("1m");
+      const res = await confirm(o.draftId, o.orderId, "pay_RcFail1");
+      assert.equal(res.status, 200, "the buyer still gets their account");
+      await settleDown();
+      assert.equal(await accounts(), 1);
+      assert.equal(await receiptSentAt(o.orderId), null, "the claim was given back");
+
+      assert.equal(await retryUnsentReceipts(), 0, "a payment this recent is left to its own sender");
+
+      mailFailure = null;
+      await t.prisma.paymentOrder.update({ where: { razorpayOrderId: o.orderId }, data: { fulfilledAt: new Date(Date.now() - 60 * 60 * 1000) } });
+      assert.equal(await retryUnsentReceipts(), 1);
+      assert.equal(mails.length, 1);
+      assert.ok(await receiptSentAt(o.orderId));
+      assert.equal(await retryUnsentReceipts(), 0, "and only once");
+    });
+
+    it("skips quietly when email is not set up, keeps the order marked unsent, and sends once it is", async () => {
+      delete process.env.SMTP_HOST;
+      const o = await orderFor("1m");
+      assert.equal((await confirm(o.draftId, o.orderId, "pay_RcNoMail")).status, 200);
+      await settleDown();
+      assert.equal(mails.length, 0);
+      assert.equal(await receiptSentAt(o.orderId), null);
+
+      process.env.SMTP_HOST = mailEnv.SMTP_HOST;
+      await t.prisma.paymentOrder.update({ where: { razorpayOrderId: o.orderId }, data: { fulfilledAt: new Date(Date.now() - 60 * 60 * 1000) } });
+      assert.equal(await retryUnsentReceipts(), 1);
+    });
+
+    it("does not chase receipts older than a week, or send one for a refunded payment", async () => {
+      const old = await orderFor("1m");
+      assert.equal((await confirm(old.draftId, old.orderId, "pay_RcOld")).status, 200);
+      await settleDown();
+      mails.length = 0;
+      await t.prisma.paymentOrder.update({ where: { razorpayOrderId: old.orderId }, data: { receiptSentAt: null, fulfilledAt: new Date(Date.now() - 8 * DAY_MS) } });
+      assert.equal(await retryUnsentReceipts(), 0);
+
+      const taken = await orderFor("1m");
+      await t.prisma.shopkeeper.create({
+        data: { email: taken.email, passwordHash: "x", shopName: "Other", shopCategory: "x", address: "x", city: "x", state: "x", pincode: "400001", phoneNumber: uniquePhone(), planType: "1m", planExpiresAt: new Date() },
+      });
+      assert.equal((await webhook(paidEvent({ orderId: taken.orderId, paymentId: "pay_RcRefund", amount: taken.amount }))).status, 200);
+      await settleDown();
+      assert.equal((await order(taken.orderId)).status, "REFUNDED");
+      assert.equal(mails.length, 0, "no receipt for money that went back");
     });
   });
 

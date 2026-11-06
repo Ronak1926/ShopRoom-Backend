@@ -92,6 +92,8 @@ model PaymentOrder {
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   fulfilledAt       DateTime?
+  /// When the payment receipt email was sent. Null until then; a daily sweep retries a fulfilled order that still has none.
+  receiptSentAt     DateTime?
 
   @@index([draftId, planType, status])
   @@index([shopkeeperId])

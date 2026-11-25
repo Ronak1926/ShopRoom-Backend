@@ -13,6 +13,8 @@ import { meetsRequiredPlan } from "./notificationPlan.service.js";
 
 export interface ListTemplatesOptions {
   categoryId?: string;
+  /** Only these templates (the Favourites tab); still paginated and active-only. */
+  ids?: string[];
   q?: string;
   sort?: "popular" | "newest" | "name";
   page?: number;
@@ -35,7 +37,8 @@ export async function listTemplates(options: ListTemplatesOptions = {}) {
   const where = {
     isActive: true,
     ...(options.categoryId ? { categoryId: options.categoryId } : {}),
-    ...(q ? { name: { contains: q, mode: "insensitive" as const } } : {}),
+    ...(options.ids ? { id: { in: options.ids } } : {}),
+    ...(q ?{ name: { contains: q, mode: "insensitive" as const } } : {}),
   };
 
   const orderBy =

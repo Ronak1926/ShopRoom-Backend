@@ -20,6 +20,7 @@ import {
 } from "../src/schemas/notification.schema.js";
 import { INK, WHITE, BRAND, type Design } from "./templates/kit.js";
 import * as L from "./templates/layouts.js";
+import { GENERATED } from "./templates/generated.js";
 
 const CATEGORY_TYPES: Record<string, NotificationType> = {
   "new-arrival": "NEW_ARRIVAL",
@@ -218,7 +219,16 @@ function buildTemplate(entry: Entry) {
   });
 }
 
-export const TEMPLATES = CATALOG.map((entry) => ({
+/** Hand-written showcase templates first (they sort first), then the generated set. */
+const ALL: Entry[] = [
+  ...CATALOG,
+  ...GENERATED.map((g) => {
+    if (!(g.categorySlug in CATEGORY_TYPES)) throw new Error(`Unknown category ${g.categorySlug} for ${g.slug}`);
+    return t(g.slug, g.name, g.categorySlug as Entry["categorySlug"], g.design);
+  }),
+];
+
+export const TEMPLATES = ALL.map((entry) => ({
   slug: entry.slug,
   name: entry.name,
   categorySlug: entry.categorySlug,

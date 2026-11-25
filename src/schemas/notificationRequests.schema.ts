@@ -60,6 +60,16 @@ export const ListDesignsQuerySchema = z.object({
  */
 export const ListTemplatesQuerySchema = z.object({
   categoryId: z.string().max(64).optional(),
+  /**
+   * Comma-separated template ids (at most 24, one page) — how the Favourites
+   * tab fetches the handful a shopkeeper saved without walking the catalog.
+   */
+  ids: z
+    .string()
+    .max(24 * 65)
+    .transform((s) => [...new Set(s.split(",").map((id) => id.trim()).filter(Boolean))])
+    .pipe(z.array(z.string().max(64)).min(1).max(24))
+    .optional(),
   q: z.string().max(120).optional(),
   sort: z.enum(["popular", "newest", "name"]).default("popular"),
   page: z.coerce.number().int().min(1).default(1),

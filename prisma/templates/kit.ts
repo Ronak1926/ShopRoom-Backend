@@ -170,15 +170,18 @@ export function cta(label: string, x: number, y: number, tone: CtaTone | string,
 
 /** Product tile: photo with a white caption (name + price) along the bottom. */
 export function tile(id: string, item: Item, x: number, y: number, w: number, h: number, delayMs: number) {
+  // Narrow tiles (collection strips) get a tighter caption so a 9-letter name still fits.
+  const pad = w < 90 ? 5 : 8;
+  const inner = w - 12 - pad * 2;
   return [
     photo(`${id}-photo`, item.photo, x, y, w, h, { radius: 10, z: 20, anim: enter("SLIDE_UP", delayMs) }),
     node(`${id}-caption`, "CONTAINER", x + 6, y + h - 40, w - 12, 34, {
-      layout: { direction: "column", align: "start", justify: "center", gap: 1, padding: { left: 8, right: 8 } },
+      layout: { direction: "column", align: "start", justify: "center", gap: 1, padding: { left: pad, right: pad } },
       style: { backgroundColor: "rgba(255,255,255,0.96)", borderRadius: 7 },
       animation: enter("FADE_IN", delayMs + 200),
       children: [
-        text(`${id}-name`, item.name, 0, 0, w - 28, 12, { color: INK, fontSize: 9, fontWeight: 600, overflow: "ellipsis" }),
-        text(`${id}-price`, item.price, 0, 0, w - 28, 15, { color: INK, fontSize: 12, fontWeight: 800, whiteSpace: "nowrap" }),
+        text(`${id}-name`, item.name, 0, 0, inner, 12, { color: INK, fontSize: w < 90 ? 8.5 : 9, fontWeight: 600, overflow: "ellipsis" }),
+        text(`${id}-price`, item.price, 0, 0, inner, 15, { color: INK, fontSize: 12, fontWeight: 800, whiteSpace: "nowrap" }),
       ],
     }, 30),
   ];
@@ -189,12 +192,12 @@ export function miniTile(id: string, item: Item, x: number, y: number, w: number
   return [
     photo(`${id}-photo`, item.photo, x, y, w, h, { radius: 8, z: 20, anim: enter("ZOOM_IN", delayMs) }),
     node(`${id}-caption`, "CONTAINER", x + 4, y + h - 22, w - 8, 18, {
-      layout: { direction: "row", align: "center", justify: "between", gap: 4, padding: { left: 6, right: 6 } },
+      layout: { direction: "row", align: "center", justify: "between", gap: 3, padding: { left: 5, right: 5 } },
       style: { backgroundColor: "rgba(255,255,255,0.96)", borderRadius: 5 },
       animation: enter("FADE_IN", delayMs + 200),
       children: [
-        text(`${id}-name`, item.name, 0, 0, w - 52, 11, { color: INK, fontSize: 8.5, fontWeight: 600, overflow: "ellipsis" }),
-        text(`${id}-price`, item.price, 0, 0, 36, 12, { color: INK, fontSize: 9.5, fontWeight: 800, textAlign: "right", whiteSpace: "nowrap" }),
+        text(`${id}-name`, item.name, 0, 0, w - 53, 11, { color: INK, fontSize: 8, fontWeight: 600, overflow: "ellipsis" }),
+        text(`${id}-price`, item.price, 0, 0, 40, 12, { color: INK, fontSize: 9.5, fontWeight: 800, textAlign: "right", whiteSpace: "nowrap" }),
       ],
     }, 30),
   ];

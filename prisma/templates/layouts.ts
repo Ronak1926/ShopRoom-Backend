@@ -535,3 +535,84 @@ export function review(c: { shop: string; quote: string; author: string; name: s
     ],
   };
 }
+
+// ── 27. Event: a date card, what's on and when ────────────────────────────────────
+export function eventDate(c: { shop: string; label: string; title: string; detail: string; day: string; month: string; cta: string; photo: PhotoName; tint: string; accent: string }): Design {
+  return {
+    background: c.tint,
+    elements: [
+      photo("product-photo", c.photo, 236, 16, 148, 168, { radius: 14, shadow: true, z: 20, anim: enter("SLIDE_LEFT", 100) }),
+      shopChip(c.shop),
+      node("date", "CONTAINER", 20, 46, 58, 62, {
+        layout: { direction: "column", align: "center", justify: "center", gap: 0 },
+        style: { backgroundColor: WHITE, borderRadius: 10, shadow: { enabled: true, x: 0, y: 6, blur: 14, spread: -4, color: "rgba(0,0,0,0.3)" } },
+        animation: enter("DROP_IN", 150),
+        children: [
+          text("date-month", c.month, 0, 0, 50, 13, { color: c.accent, fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", textAlign: "center" }),
+          text("date-day", c.day, 0, 0, 50, 32, { color: INK, fontSize: 28, fontWeight: 800, textAlign: "center" }),
+        ],
+      }, 70),
+      text("name", c.title, 88, 46, 142, 62, { ...heading(WHITE, 17), verticalAlign: "center" }, enter("SLIDE_UP", 250)),
+      text("label", c.label, 20, 118, 206, 14, eyebrow(c.accent), enter("FADE_IN", 200)),
+      text("detail", c.detail, 20, 134, 206, 14, { color: WHITE, fontSize: 10.5, opacity: 0.85, whiteSpace: "nowrap" }, enter("FADE_IN", 350)),
+      cta(c.cta, 20, 156, "light", 450),
+    ],
+  };
+}
+
+// ── 28. Announcement: icon, headline and a line of detail over a photo ────────────
+export function announcement(c: { shop: string; icon: string; headline: string; sub: string; cta: string; photo: PhotoName; tint: string; accent: string }): Design {
+  return {
+    background: c.tint,
+    elements: [
+      photo("product-photo", c.photo, 0, 0, 400, 200, { overlay: leftScrim(c.tint, 0.92) }),
+      shopChip(c.shop),
+      node("badge", "CONTAINER", 20, 46, 34, 34, {
+        layout: { direction: "row", align: "center", justify: "center" },
+        style: { backgroundColor: c.accent, borderRadius: 9999 },
+        animation: enter("POP", 100, "PULSE"),
+        children: [icon("badge-icon", c.icon, 0, 0, 18, WHITE)],
+      }, 70),
+      text("name", c.headline, 20, 86, 236, 50, heading(WHITE, 22), enter("SLIDE_UP", 200)),
+      text("detail", c.sub, 20, 138, 236, 14, { color: WHITE, fontSize: 10.5, opacity: 0.85, whiteSpace: "nowrap" }, enter("FADE_IN", 300)),
+      cta(c.cta, 20, 160, "light", 450, 26),
+    ],
+  };
+}
+
+// ── 29. Reminder: the product they looked at, with a nudge ────────────────────────
+export function reminder(c: { shop: string; label: string; headline: string; name: string; price: string; cta: string; photo: PhotoName; bg: string; accent: string }): Design {
+  return {
+    background: c.bg,
+    elements: [
+      photo("product-photo", c.photo, 16, 16, 120, 168, { radius: 12, shadow: true, z: 20, anim: enter("SLIDE_RIGHT", 100) }),
+      shopChip(c.shop, 152, 14, alpha(c.accent, 0.1)),
+      icon("reminder-icon", "Notifications", 152, 46, 14, c.accent, enter("FADE_IN", 100, "SWING")),
+      text("label", c.label, 170, 46, 200, 14, { ...eyebrow(c.accent), fontWeight: 700, opacity: 1 }, enter("FADE_IN", 100)),
+      text("name", c.headline, 152, 63, 232, 44, heading(INK, 20), enter("SLIDE_UP", 200)),
+      text("product", c.name, 152, 109, 232, 16, { color: INK, fontSize: 12.5, fontWeight: 600, opacity: 0.8, whiteSpace: "nowrap", overflow: "ellipsis" }, enter("FADE_IN", 300)),
+      text("price", c.price, 152, 126, 140, 26, priceStyle(c.accent, 20), enter("FADE_IN", 350)),
+      cta(c.cta, 152, 158, "dark", 450),
+    ],
+  };
+}
+
+// ── 30. Order ready for pickup ────────────────────────────────────────────────────
+export function pickupReady(c: { shop: string; headline: string; sub: string; code: string; photo: PhotoName; bg: string; accent: string }): Design {
+  return {
+    background: c.bg,
+    elements: [
+      photo("product-photo", c.photo, 200, 0, 200, 200, { overlay: fadeFromLeft(c.bg), anim: enter("FADE_IN") }),
+      shopChip(c.shop),
+      node("check", "CONTAINER", 20, 48, 36, 36, {
+        layout: { direction: "row", align: "center", justify: "center" },
+        style: { backgroundColor: c.accent, borderRadius: 9999 },
+        animation: enter("POP", 100, "HEARTBEAT"),
+        children: [icon("check-icon", "CheckCircleOutlined", 0, 0, 22, WHITE)],
+      }, 70),
+      text("name", c.headline, 20, 90, 210, 50, heading(WHITE, 22), enter("SLIDE_UP", 200)),
+      text("detail", c.sub, 20, 142, 210, 14, { color: WHITE, fontSize: 10.5, opacity: 0.85, whiteSpace: "nowrap" }, enter("FADE_IN", 300)),
+      pill("order-code", c.code, 20, 162, 110, 24, { color: WHITE, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, borderRadius: 6, border: { width: 1, color: alpha(WHITE, 0.5), style: "dashed" } }, enter("SLIDE_UP", 400)),
+    ],
+  };
+}

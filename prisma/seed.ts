@@ -95,7 +95,7 @@ function deriveOwnerName(index: number, pool: CustomerPool): string {
 // ── Main ───────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log("🌱  Seeding ShopRoom database...\n");
+  console.log("🌱  Seeding CounterCircle database...\n");
 
   // Hash passwords once (all shopkeepers share one password, all customers another)
   const [shopkeeperHash, customerHash] = await Promise.all([

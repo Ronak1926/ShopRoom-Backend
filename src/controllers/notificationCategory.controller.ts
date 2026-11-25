@@ -5,10 +5,9 @@
 
 import type { Request, Response } from "express";
 import { listCategories as listCategoriesService } from "../services/notificationCategory.service.js";
-import {
-  getShopkeeperPlan,
-  getPlanCapabilities,
-} from "../services/notificationPlan.service.js";
+import { getPlanCapabilities } from "../services/notificationPlan.service.js";
+import { getPlanStatus } from "../services/billing.service.js";
+import { getSendsToday } from "../services/notificationUsage.service.js";
 import { handleControllerError } from "./notificationResponse.js";
 
 // GET /api/notifications/categories
@@ -25,8 +24,19 @@ export async function listCategories(req: Request, res: Response): Promise<void>
 // GET /api/notifications/capabilities — plan-derived feature flags + limits
 export async function getCapabilities(req: Request, res: Response): Promise<void> {
   try {
-    const planType = await getShopkeeperPlan(req.shopkeeperId!);
-    res.json({ data: { planType, capabilities: getPlanCapabilities(planType) } });
+    const [plan, usedToday] = await Promise.all([
+      getPlanStatus(req.shopkeeperId!),
+      getSendsToday(req.shopkeeperId!),
+    ]);
+    res.json({
+      data: {
+        planType: plan.planType,
+        planActive: plan.active,
+        planExpiresAt: plan.planExpiresAt,
+        capabilities: getPlanCapabilities(plan.planType),
+        usedToday,
+      },
+    });
   } catch (err) {
     handleControllerError(res, err, "Failed to load capabilities");
   }

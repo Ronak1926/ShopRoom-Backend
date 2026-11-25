@@ -1,22 +1,31 @@
 import type { Request, Response } from "express";
 import z from "zod";
 import { parseBody } from "../utils/validate.js";
-import { signCustomerToken } from "../utils/jwt.js";
+import { signCustomerToken, signMfaPendingToken } from "../utils/jwt.js";
+import { isMfaEnabled } from "../services/mfa.service.js";
+import { clearSessionCookie, sendSession } from "../lib/sessionCookie.js";
 import {
+  deleteCustomerAccount,
   getCustomerById,
   getJoinedRooms,
   googleAuthCustomer,
   loginCustomer,
   registerCustomer,
+  reportCustomerLocation,
   updateCustomer,
 } from "../services/customers.service.js";
+import { revokeSessions } from "../services/session.service.js";
+import { disconnectViewer, removeViewerFromRoom } from "../realtime/socket.js";
+import { newPasswordSchema } from "../utils/password.js";
 import { firebaseAuth } from "../lib/firebaseAdmin.js";
+import { confirmCustomerIdentity } from "../services/reauth.service.js";
+import { recordSecurityEvent } from "../services/securityEvent.service.js";
 
 const registerCustomerSchema = z
   .object({
     fullName: z.string().trim().min(2).max(120),
     email: z.string().trim().toLowerCase().email().max(254),
-    password: z.string().min(8).max(200),
+    password: newPasswordSchema,
     allowLocationAccess: z.boolean().optional().default(false),
     latitude: z.number().min(-90).max(90).optional(),
     longitude: z.number().min(-180).max(180).optional(),
@@ -44,7 +53,7 @@ type LoginCustomerDto = z.infer<typeof loginCustomerSchema>;
 
 const googleAuthSchema = z
   .object({
-    idToken: z.string().min(10),
+    idToken: z.string().min(10).max(4096),
     allowLocationAccess: z.boolean().optional(),
     latitude: z.number().min(-90).max(90).optional(),
     longitude: z.number().min(-180).max(180).optional(),
@@ -90,16 +99,12 @@ export async function registerCustomerHandler(req: Request, res: Response) {
     });
   }
 
-  const token = signCustomerToken(result.customer.id);
-  return res.json({
-    token,
-    cusomer: result.customer,
-  });
+  const token = signCustomerToken(result.customer.id, result.tokenVersion);
+  return sendSession(req, res, "customer", token, { customerId: result.customer.id, cusomer: result.customer });
 }
 
 export async function meCustomerHandler(req: Request, res: Response) {
   const customerId = req.customerId;
-  console.log("Customer ID from request:", customerId);
   if (!customerId) {
     return res.status(401).json({ message: "Unauthorized" });
   }
@@ -131,6 +136,28 @@ export async function updateCustomerHandler(req: Request, res: Response) {
   return res.json({ customer, message: "Profile updated" });
 }
 
+// ─── PUT /api/customers/me/location ───────────────────────────────────────────
+// The device's current position, for radius-based notifications.
+// Body: { latitude, longitude }. Auth: requireCustomerAuth.
+
+const reportLocationSchema = z.object({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+});
+
+export async function reportLocationHandler(req: Request, res: Response) {
+  const parsed = parseBody(req, reportLocationSchema);
+  if (!parsed.ok) {
+    return validationError(res, parsed.error);
+  }
+
+  const stored = await reportCustomerLocation(req.customerId!, parsed.data);
+  if (!stored) {
+    return res.status(403).json({ message: "Location access is turned off for this account" });
+  }
+  return res.json({ message: "Location updated" });
+}
+
 // ─── GET /api/customers/me/rooms ──────────────────────────────────────────────
 // Rooms the authenticated customer has joined. Auth: requireCustomerAuth.
 
@@ -142,7 +169,6 @@ export async function meRoomsHandler(req: Request, res: Response) {
 
 export async function loginCustomerHandler(req: Request, res: Response) {
   const parsed = parseBody<LoginCustomerDto>(req, loginCustomerSchema);
-  // console.log("Parsed login data:", parsed);
   if (!parsed.ok) {
     return validationError(res, parsed.error);
   }
@@ -153,13 +179,16 @@ export async function loginCustomerHandler(req: Request, res: Response) {
   });
 
   if (!result.ok) {
+    recordSecurityEvent(req, { type: "LOGIN_FAILED", role: "CUSTOMER", actorId: result.customerId, detail: { method: "password" } });
     return res.status(401).json({ message: "Invalid email or password" });
   }
 
-  const token = signCustomerToken(result.customer.id);
-  return res.json({
-    token,
-  });
+  if (await isMfaEnabled("CUSTOMER", result.customer.id)) {
+    return res.json({ mfaRequired: true, mfaToken: signMfaPendingToken("CUSTOMER", result.customer.id, result.tokenVersion) });
+  }
+  recordSecurityEvent(req, { type: "LOGIN_SUCCESS", role: "CUSTOMER", actorId: result.customer.id, detail: { method: "password" } });
+  const token = signCustomerToken(result.customer.id, result.tokenVersion);
+  return sendSession(req, res, "customer", token, { customerId: result.customer.id });
 }
 
 export async function googleAuthCustomerHandler(req: Request, res: Response) {
@@ -175,17 +204,68 @@ export async function googleAuthCustomerHandler(req: Request, res: Response) {
     return res.status(401).json({ message: "Invalid or expired Google token" });
   }
 
-  const { uid, email, name } = decodedToken;
-  if (!email) {
-    return res.status(400).json({ message: "Google account has no email" });
+  // Only a Google-verified email may claim (or be linked to) an account;
+  // other Firebase providers can assert any address they like.
+  const { uid, email, name, email_verified: emailVerified, firebase } = decodedToken;
+  if (!email || emailVerified !== true || firebase?.sign_in_provider !== "google.com") {
+    return res.status(401).json({ message: "Invalid or expired Google token" });
   }
 
   const result = await googleAuthCustomer({
     firebaseUid: uid,
-    email,
+    email: email.toLowerCase(),
     fullName: name ?? email.split("@")[0],
   });
 
-  const token = signCustomerToken(result.customer.id);
-  return res.json({ token, customer: result.customer });
+  if (await isMfaEnabled("CUSTOMER", result.customer.id)) {
+    return res.json({ mfaRequired: true, mfaToken: signMfaPendingToken("CUSTOMER", result.customer.id, result.tokenVersion) });
+  }
+  recordSecurityEvent(req, { type: "LOGIN_SUCCESS", role: "CUSTOMER", actorId: result.customer.id, detail: { method: "google" } });
+  const token = signCustomerToken(result.customer.id, result.tokenVersion);
+  return sendSession(req, res, "customer", token, { customerId: result.customer.id, customer: result.customer });
+}
+
+// ─── POST /api/customers/me/logout-all ────────────────────────────────────────
+// Invalidates every session of the account, including the one making the call.
+
+export async function logoutAllHandler(req: Request, res: Response) {
+  await revokeSessions("customer", req.customerId!);
+  recordSecurityEvent(req, { type: "SESSIONS_REVOKED", role: "CUSTOMER", actorId: req.customerId });
+  disconnectViewer(req.customerId!);
+  clearSessionCookie(res, "customer");
+  return res.json({ message: "Signed out everywhere" });
+}
+
+// ─── DELETE /api/customers/me ─────────────────────────────────────────────────
+// Permanently deletes the account and its data. The caller must prove it's
+// really them again: their password, or — for Google-only accounts — an ID
+// token from a Google sign-in performed in the last few minutes.
+
+const deleteAccountSchema = z.object({
+  password: z.string().min(1).max(200).optional(),
+  idToken: z.string().min(10).max(4096).optional(),
+});
+
+export async function deleteAccountHandler(req: Request, res: Response) {
+  const customerId = req.customerId!;
+  const parsed = parseBody(req, deleteAccountSchema);
+  if (!parsed.ok) {
+    return validationError(res, parsed.error);
+  }
+
+  const proof = await confirmCustomerIdentity(customerId, parsed.data);
+  if (proof === "not-found") {
+    return res.status(404).json({ message: "Customer not found" });
+  }
+  if (proof !== "confirmed") {
+    recordSecurityEvent(req, { type: "REAUTH_FAILED", role: "CUSTOMER", actorId: customerId, detail: { action: "delete_account" } });
+    return res.status(403).json({ message: "Could not confirm your identity" });
+  }
+
+  const roomIds = await deleteCustomerAccount(customerId);
+  for (const roomId of roomIds) {
+    removeViewerFromRoom(customerId, roomId);
+  }
+  disconnectViewer(customerId);
+  return res.json({ message: "Your account has been deleted" });
 }

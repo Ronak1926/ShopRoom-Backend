@@ -1,5 +1,5 @@
 /**
- * types/index.ts — Domain TypeScript interfaces for ShopRoom.
+ * types/index.ts — Domain TypeScript interfaces for CounterCircle.
  *
  * These mirror the Prisma models but are expressed as plain interfaces so
  * they can be used in service layer return types, API response shapes, and

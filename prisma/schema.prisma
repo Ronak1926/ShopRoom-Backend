@@ -8,31 +8,241 @@ datasource db {
 }
 
 model Customer {
-  id                  String   @id @default(cuid())
+  id                  String    @id @default(cuid())
   fullName            String
-  email               String   @unique
+  email               String    @unique
   passwordHash        String?
-  firebaseUid         String?  @unique
-  allowLocationAccess Boolean  @default(false)
+  firebaseUid         String?   @unique
+  allowLocationAccess Boolean   @default(false)
   latitude            Float?
   longitude           Float?
-  emailVerified       Boolean  @default(false)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  locationUpdatedAt   DateTime? // when latitude/longitude were last reported by the customer's device
+  emailVerified       Boolean   @default(false)
+  /// Bumped to invalidate every session issued before it (sign out everywhere).
+  tokenVersion        Int       @default(0)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   // Relations
-  memberships     Membership[]
-  sentMessages    Message[]         @relation("MessageCustomerSender")
-  messageReactions MessageReaction[]
-  roomViewerStates RoomViewerState[]
+  memberships            Membership[]
+  sentMessages           Message[]                   @relation("MessageCustomerSender")
+  messageReactions       MessageReaction[]
+  roomViewerStates       RoomViewerState[]
+  devices                CustomerDevice[]
+  notificationRecipients NotificationSendRecipient[]
+
+  @@index([latitude, longitude])
+}
+
+enum PlanPaymentPurpose {
+  REGISTRATION
+  RENEWAL
+}
+
+/// Every plan payment ever accepted. Order and payment ids are unique across the whole
+/// table, so a captured payment can only ever buy one thing — a renewal cannot be
+/// faked by replaying an earlier payment (Shopkeeper keeps only the registration ids).
+model PlanPayment {
+  id                String             @id @default(cuid())
+  shopkeeperId      String
+  shopkeeper        Shopkeeper         @relation(fields: [shopkeeperId], references: [id], onDelete: Cascade)
+  purpose           PlanPaymentPurpose
+  planType          String
+  /// Paise.
+  amount            Int
+  razorpayOrderId   String             @unique
+  razorpayPaymentId String             @unique
+  createdAt         DateTime           @default(now())
+  /// Set when the money was returned from the Razorpay dashboard; the plan time it bought was taken back.
+  refundedAt        DateTime?
+  /// GST tax invoice, issued the first time it is asked for. The snapshot is exactly what was printed.
+  invoiceNumber     String?            @unique
+  invoiceSnapshot   Json?
+  invoicedAt        DateTime?
+
+  @@index([shopkeeperId, createdAt(sort: Desc)])
+}
+
+/// Last invoice number used in each financial year ("2026-27"). Incremented under a row lock so numbers never repeat or skip.
+model InvoiceCounter {
+  financialYear String @id
+  lastNumber    Int
+}
+
+/// Tax invoices that outlive the account they were issued to. Deleting an account erases its data, but
+/// an invoice that has been issued is a tax record the business may have to keep, so a copy of its
+/// snapshot is kept here with no link to the account. Nothing reads this table in the app.
+model InvoiceArchive {
+  invoiceNumber String   @id
+  snapshot      Json
+  issuedAt      DateTime
+  archivedAt    DateTime @default(now())
+
+  @@index([issuedAt])
+}
+
+enum PaymentOrderStatus {
+  /// The order exists at Razorpay and nothing has been paid yet.
+  CREATED
+  /// Paid, and the account or plan extension was granted.
+  FULFILLED
+  /// Paid, but the purchase could not be granted; the money went back automatically.
+  REFUNDED
+  /// Paid, could not be granted, and the automatic refund has not gone through yet (it is retried).
+  NEEDS_REFUND
+}
+
+/// One Razorpay order WE created, and what it is for. Every later step (browser confirmation,
+/// webhook, refund) is checked against this row instead of trusting anything the client or a
+/// receipt string says: the amount, the plan and who it is for were fixed when the order was made.
+model PaymentOrder {
+  /// Also sent to Razorpay as the receipt, so the dashboard and this table line up.
+  id                String             @id
+  razorpayOrderId   String             @unique
+  purpose           PlanPaymentPurpose
+  planType          String
+  /// Paise: what we asked Razorpay to charge.
+  amount            Int
+  status            PaymentOrderStatus @default(CREATED)
+  /// Registration orders: the draft being paid for. Not a foreign key: the draft is deleted on success.
+  draftId           String?
+  /// Renewal orders from the start; registration orders once the account exists.
+  shopkeeperId      String?
+  shopkeeper        Shopkeeper?        @relation(fields: [shopkeeperId], references: [id], onDelete: Cascade)
+  razorpayPaymentId String?            @unique
+  razorpayRefundId  String?
+  /// Why a paid order could not be granted.
+  failureReason     String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  fulfilledAt       DateTime?
+  /// When the payment receipt email was sent. Null until then; a daily sweep retries a fulfilled order that still has none.
+  receiptSentAt     DateTime?
+
+  @@index([draftId, planType, status])
+  @@index([shopkeeperId])
+  @@index([status, createdAt])
+  // The daily receipt sweep looks for fulfilled orders in a recent window.
+  @@index([status, fulfilledAt])
+}
+
+/// A shopkeeper's notification defaults. The server enforces quietFrom, quietTo, weekendSending
+/// and expiryHours; everything else in settings is stored for the studio to apply as defaults.
+model NotificationPreference {
+  shopkeeperId String     @id
+  shopkeeper   Shopkeeper @relation(fields: [shopkeeperId], references: [id], onDelete: Cascade)
+  settings     Json
+  updatedAt    DateTime   @updatedAt
+}
+
+enum AccountRole {
+  CUSTOMER
+  SHOPKEEPER
+}
+
+/// A one-time "set a new password" link. Only a SHA-256 of the token is stored.
+/// accountId is not a foreign key because it points at one of two tables; account
+/// deletion and the retention job remove the rows.
+enum SecurityEventType {
+  LOGIN_SUCCESS
+  LOGIN_FAILED
+  PASSWORD_CHANGED
+  PASSWORD_RESET
+  SESSIONS_REVOKED
+  DATA_EXPORTED
+  REAUTH_FAILED
+  MFA_ENABLED
+  MFA_DISABLED
+  MFA_FAILED
+  MFA_RECOVERY_USED
+}
+
+/// Sensitive things that happened to an account. actorId is not a foreign key: a failed sign-in for an
+/// address with no account has none, and the rows are erased with the account by the deletion code.
+model SecurityEvent {
+  id        String            @id @default(cuid())
+  type      SecurityEventType
+  actorRole AccountRole
+  actorId   String?
+  ip        String?
+  userAgent String?
+  /// Small, non-secret context such as the sign-in method. Never a password, token, code or email.
+  detail    Json?
+  createdAt DateTime          @default(now())
+
+  @@index([actorRole, actorId, createdAt(sort: Desc)])
+  @@index([type, createdAt])
+  @@index([createdAt])
+}
+
+/// An authenticator-app credential. enabledAt is null while setup is pending (the secret has been
+/// shown but the person has not yet proved their app works). One per account.
+model MfaCredential {
+  id           String      @id @default(cuid())
+  role         AccountRole
+  accountId    String
+  /// The base32 secret, encrypted at rest.
+  secretEnc    String
+  enabledAt    DateTime?
+  /// Newest time step already accepted, so a code cannot be used twice.
+  lastUsedStep Int?
+  createdAt    DateTime    @default(now())
+
+  recoveryCodes MfaRecoveryCode[]
+
+  @@unique([role, accountId])
+}
+
+/// One-time codes for a lost phone. Only the SHA-256 of each is stored.
+model MfaRecoveryCode {
+  id           String        @id @default(cuid())
+  credentialId String
+  credential   MfaCredential @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+  codeHash     String
+  usedAt       DateTime?
+
+  @@unique([credentialId, codeHash])
+}
+
+model PasswordResetToken {
+  id        String      @id @default(cuid())
+  role      AccountRole
+  accountId String
+  tokenHash String      @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime    @default(now())
+
+  @@index([role, accountId])
+  @@index([expiresAt])
+}
+
+/// Landing-page newsletter sign-ups. Nothing is sent from here yet; the list is kept so it can be.
+model NewsletterSubscriber {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  createdAt DateTime @default(now())
+}
+
+/// Hit counter for rate limits that must hold across several API instances (login, OTP,
+/// sign-up, payments). One row per limiter and client key; a row is reset when its window ends.
+model RateLimitCounter {
+  key     String   @id
+  hits    Int
+  resetAt DateTime @db.Timestamptz(3)
+
+  @@index([resetAt])
 }
 
 model EmailOtp {
   id        String   @id @default(cuid())
   email     String
+  /// HMAC of the 6-digit code — the code itself is never stored.
   code      String
   expiresAt DateTime
   used      Boolean  @default(false)
+  /// Wrong guesses so far; the code is burned once this reaches the cap.
+  attempts  Int      @default(0)
   createdAt DateTime @default(now())
 
   @@index([email])
@@ -70,20 +280,29 @@ model Shopkeeper {
   planType          String
   planExpiresAt     DateTime
   // ── Razorpay payment fields ─────────────────────────────────────────────────
-  razorpayOrderId   String? // Razorpay order ID (order_xxx) created before checkout
-  razorpayPaymentId String? // Razorpay payment ID (pay_xxx) captured after success
+  razorpayOrderId   String?  @unique // Razorpay order ID (order_xxx) created before checkout
+  razorpayPaymentId String?  @unique // Razorpay payment ID (pay_xxx); unique so one payment can only ever buy one account
+  /// Bumped to invalidate every session issued before it (sign out everywhere).
+  tokenVersion      Int      @default(0)
+  /// Optional GSTIN printed on invoices as the buyer's.
+  gstin             String?
   // ── Stripe (commented out — replaced by Razorpay) ──────────────────────────
   // stripePaymentId String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   // Relations
-  shop                Shop?
-  sentMessages        Message[]            @relation("MessageShopkeeperSender")
-  messageReactions    MessageReaction[]
-  roomViewerStates    RoomViewerState[]
-  notificationDesigns NotificationDesign[]
-  notificationAssets  NotificationAsset[]
+  shop                   Shop?
+  planPayments           PlanPayment[]
+  paymentOrders          PaymentOrder[]
+  notificationPreference NotificationPreference?
+  sentMessages           Message[]               @relation("MessageShopkeeperSender")
+  messageReactions       MessageReaction[]
+  roomViewerStates       RoomViewerState[]
+  notificationDesigns    NotificationDesign[]
+  notificationAssets     NotificationAsset[]
+  notificationSends      NotificationSend[]
+  notificationSchedules  NotificationSchedule[]
 }
 
 // ─── Shop / Room ──────────────────────────────────────────────────────────────
@@ -120,6 +339,7 @@ model Shop {
 
   @@index([category])
   @@index([ownerId])
+  @@index([latitude, longitude])
 }
 
 /// The community room auto-created for every shop at registration.
@@ -128,11 +348,13 @@ model Room {
   shopId String @unique
   shop   Shop   @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
-  inviteCode   String       @unique
-  membersCount Int          @default(0)
-  memberships  Membership[]
-  messages     Message[]
-  viewerStates RoomViewerState[]
+  inviteCode            String                 @unique
+  membersCount          Int                    @default(0)
+  memberships           Membership[]
+  messages              Message[]
+  viewerStates          RoomViewerState[]
+  notificationSends     NotificationSend[]
+  notificationSchedules NotificationSchedule[]
 
   // Media
   coverUrl String? // background/hero image for the room discover card
@@ -141,6 +363,7 @@ model Room {
   updatedAt DateTime @updatedAt
 
   @@index([inviteCode])
+  @@index([membersCount])
 }
 
 /// A customer's membership in a shop's room.
@@ -155,7 +378,7 @@ model Membership {
   notificationsEnabled Boolean  @default(true)
 
   @@unique([roomId, customerId])
-  @@index([roomId])
+  @@index([roomId, joinedAt(sort: Desc)])
   @@index([customerId])
 }
 
@@ -174,9 +397,9 @@ model Message {
 
   senderType   MessageSenderType
   customerId   String?
-  customer     Customer?   @relation("MessageCustomerSender", fields: [customerId], references: [id], onDelete: Cascade)
+  customer     Customer?         @relation("MessageCustomerSender", fields: [customerId], references: [id], onDelete: Cascade)
   shopkeeperId String?
-  shopkeeper   Shopkeeper? @relation("MessageShopkeeperSender", fields: [shopkeeperId], references: [id], onDelete: Cascade)
+  shopkeeper   Shopkeeper?       @relation("MessageShopkeeperSender", fields: [shopkeeperId], references: [id], onDelete: Cascade)
 
   text      String
   createdAt DateTime @default(now())
@@ -192,6 +415,11 @@ model Message {
   hiddenFor MessageHiddenFor[]
 
   @@index([roomId, createdAt])
+  // Foreign keys that cascade or null out on delete. Without them, deleting a message
+  // scans the table once per reply lookup, and deleting an account scans it for their messages.
+  @@index([replyToId])
+  @@index([customerId])
+  @@index([shopkeeperId])
 }
 
 /// One reaction per participant per message — keyed by viewerKey
@@ -199,9 +427,9 @@ model Message {
 /// either a customer member or the shop's own owner. Re-reacting with the
 /// same emoji removes it (toggle); a different emoji replaces it.
 model MessageReaction {
-  id           String  @id @default(cuid())
+  id           String      @id @default(cuid())
   messageId    String
-  message      Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  message      Message     @relation(fields: [messageId], references: [id], onDelete: Cascade)
   viewerKey    String
   customerId   String?
   customer     Customer?   @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -213,6 +441,9 @@ model MessageReaction {
 
   @@unique([messageId, viewerKey])
   @@index([messageId])
+  // Foreign keys that cascade on account deletion and are read by the data export.
+  @@index([customerId])
+  @@index([shopkeeperId])
 }
 
 /// "Delete for me" — hides a single message from one participant's own view
@@ -232,9 +463,9 @@ model MessageHiddenFor {
 /// used to gate the edit/delete-for-everyone "seen" rule, plus the
 /// "cleared at" boundary for that participant's own Clear Chat.
 model RoomViewerState {
-  id           String  @id @default(cuid())
+  id           String      @id @default(cuid())
   roomId       String
-  room         Room    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  room         Room        @relation(fields: [roomId], references: [id], onDelete: Cascade)
   viewerKey    String
   customerId   String?
   customer     Customer?   @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -243,15 +474,18 @@ model RoomViewerState {
 
   lastReadAt DateTime?
   clearedAt  DateTime?
-  updatedAt  DateTime @updatedAt
+  updatedAt  DateTime  @updatedAt
 
   @@unique([roomId, viewerKey])
   @@index([roomId, lastReadAt])
+  // Foreign keys that cascade on account deletion and are read by the data export.
+  @@index([customerId])
+  @@index([shopkeeperId])
 }
 
 // ─── Customizable Notifications ─────────────────────────────────────────────────
 // A notification is a data-driven design document (designJson), not a hard-coded
-// component. ShopRoom templates and shopkeeper custom notifications are the same
+// component. CounterCircle templates and shopkeeper custom notifications are the same
 // kind of object once they enter the rendering pipeline.
 
 enum NotificationDesignStatus {
@@ -284,21 +518,23 @@ model NotificationCategory {
   @@index([isActive])
 }
 
-/// ShopRoom-provided starting design. Cloned into a shopkeeper-owned design.
+/// CounterCircle-provided starting design. Cloned into a shopkeeper-owned design.
 model NotificationTemplate {
-  id            String  @id @default(cuid())
-  slug          String  @unique
-  name          String
-  categoryId    String
-  category      NotificationCategory @relation(fields: [categoryId], references: [id])
-  designJson    Json
-  thumbnailUrl  String?
-  schemaVersion Int     @default(1)
-  requiredPlan  String? // null = available on every plan; else "1m" | "2m" | "3m"
-  isActive      Boolean @default(true)
-  sortOrder     Int     @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id             String               @id @default(cuid())
+  slug           String               @unique
+  name           String
+  categoryId     String
+  category       NotificationCategory @relation(fields: [categoryId], references: [id])
+  designJson     Json
+  thumbnailUrl   String?
+  schemaVersion  Int                  @default(1)
+  requiredPlan   String? // null = available on every plan; else "1m" | "2m" | "3m"
+  /// The made-up shop name the sample design uses; replaced with the real shop's name when a shopkeeper uses the template.
+  sampleShopName String?
+  isActive       Boolean              @default(true)
+  sortOrder      Int                  @default(0)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
 
   designs NotificationDesign[]
 
@@ -327,19 +563,23 @@ model NotificationDesign {
   versions NotificationDesignVersion[]
 
   @@index([shopkeeperId])
-  @@index([shopkeeperId, isArchived])
+  @@index([shopkeeperId, isArchived, updatedAt(sort: Desc)])
   @@index([categoryId])
+  @@index([sourceTemplateId])
 }
 
 /// Immutable snapshot for restore/rollback. Written on explicit save-version.
 model NotificationDesignVersion {
-  id         String   @id @default(cuid())
+  id         String             @id @default(cuid())
   designId   String
   design     NotificationDesign @relation(fields: [designId], references: [id], onDelete: Cascade)
   version    Int
   designJson Json
   createdBy  String // shopkeeperId that created the snapshot
-  createdAt  DateTime @default(now())
+  createdAt  DateTime           @default(now())
+
+  sends     NotificationSend[]
+  schedules NotificationSchedule[]
 
   @@unique([designId, version])
   @@index([designId])
@@ -367,7 +607,7 @@ model NotificationAnimation {
 
 /// Image/media uploaded by a shopkeeper. designJson stores only the reference.
 model NotificationAsset {
-  id                 String   @id @default(cuid())
+  id                 String     @id @default(cuid())
   shopkeeperId       String
   shopkeeper         Shopkeeper @relation(fields: [shopkeeperId], references: [id], onDelete: Cascade)
   cloudinaryPublicId String
@@ -376,7 +616,201 @@ model NotificationAsset {
   height             Int?
   mimeType           String?
   sizeBytes          Int?
-  createdAt          DateTime @default(now())
+  createdAt          DateTime   @default(now())
 
-  @@index([shopkeeperId])
+  @@index([shopkeeperId, createdAt(sort: Desc)])
+}
+
+// ─── Push Notification Delivery ─────────────────────────────────────────────────
+// Device registration + send/dispatch records. The design itself stays in
+// NotificationDesign/NotificationDesignVersion above — these models only track
+// where a design was delivered to and what happened when it was sent.
+
+enum DevicePlatform {
+  WEB
+  ANDROID
+  IOS
+}
+
+/// One row per browser/device registration. fcmToken is globally unique —
+/// re-registering the same browser under a different account reassigns it
+/// via upsert-by-token, which is correct: the device belongs to whoever is
+/// currently logged in on it.
+model CustomerDevice {
+  id         String         @id @default(cuid())
+  customerId String
+  customer   Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  fcmToken   String         @unique
+  platform   DevicePlatform @default(WEB)
+  userAgent  String?
+  lastSeenAt DateTime       @default(now())
+  createdAt  DateTime       @default(now())
+
+  recipients NotificationSendRecipient[]
+
+  @@index([customerId])
+  @@index([lastSeenAt])
+}
+
+enum NotificationSendStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+/// Who a send targets. MEMBERS_AND_NEARBY is the union of room members and
+/// everyone inside the radius (the scheduling wizard's two audience legs).
+enum NotificationAudienceMode {
+  ROOM_MEMBERS
+  NEARBY
+  MEMBERS_NEARBY
+  MEMBERS_AND_NEARBY
+}
+
+/// One shopkeeper click of "Send" (or one run of a schedule). Pinned to an
+/// immutable NotificationDesignVersion so later edits to the live design never
+/// change what was actually delivered. Aggregate counters are denormalised
+/// from NotificationSendRecipient so history lists stay a single query.
+model NotificationSend {
+  id              String                    @id @default(cuid())
+  shopkeeperId    String
+  shopkeeper      Shopkeeper                @relation(fields: [shopkeeperId], references: [id], onDelete: Cascade)
+  roomId          String
+  room            Room                      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  designVersionId String
+  designVersion   NotificationDesignVersion @relation(fields: [designVersionId], references: [id], onDelete: Restrict)
+  audience        NotificationAudienceMode  @default(ROOM_MEMBERS)
+  radiusKm        Int?
+  message         String?
+  status          NotificationSendStatus    @default(PENDING)
+  failureReason   String?
+  recipientCount  Int                       @default(0)
+  successCount    Int                       @default(0)
+  failureCount    Int                       @default(0)
+  deliveredCount  Int                       @default(0)
+  openedCount     Int                       @default(0)
+  clickedCount    Int                       @default(0)
+  sentAt          DateTime?
+  createdAt       DateTime                  @default(now())
+
+  // Set when this send is one run of a schedule. The (scheduleId, scheduledFor)
+  // pair is the idempotency key that stops a crash-and-retry from sending the
+  // same occurrence twice.
+  scheduleId   String?
+  schedule     NotificationSchedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  scheduledFor DateTime?
+
+  recipients NotificationSendRecipient[]
+
+  @@unique([scheduleId, scheduledFor])
+  @@index([shopkeeperId, createdAt])
+  @@index([roomId])
+  @@index([designVersionId])
+}
+
+enum RecipientStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+/// One row per (send, device): what happened to that single push. receiptToken
+/// is an unguessable capability the device presents when it reports
+/// delivered / opened / clicked — the endpoint takes no login because a
+/// service worker has none.
+model NotificationSendRecipient {
+  id           String           @id @default(cuid())
+  sendId       String
+  send         NotificationSend @relation(fields: [sendId], references: [id], onDelete: Cascade)
+  customerId   String
+  customer     Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  deviceId     String?
+  device       CustomerDevice?  @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  receiptToken String           @unique
+  status       RecipientStatus  @default(QUEUED)
+  errorCode    String?
+  deliveredAt  DateTime?
+  openedAt     DateTime?
+  clickedAt    DateTime?
+  createdAt    DateTime         @default(now())
+
+  @@unique([sendId, deviceId])
+  @@index([sendId])
+  @@index([customerId])
+  // Deleting a device nulls its recipient rows through this foreign key; without an index each delete scans the table.
+  @@index([deviceId])
+  @@index([createdAt])
+}
+
+// ─── Scheduled Sends ────────────────────────────────────────────────────────────
+
+enum ScheduleRecurrence {
+  ONCE
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum ScheduleEndMode {
+  NEVER
+  ON
+  AFTER
+}
+
+enum DeliverySpeed {
+  STANDARD
+  PRIORITY
+}
+
+enum ScheduleStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+/// A notification queued to go out later, once or on a recurrence. The design
+/// is pinned to an immutable version at scheduling time, so every run delivers
+/// exactly the banner the shopkeeper picked. nextRunAt is the single field the
+/// worker polls on; lockedUntil is its short-lived claim (FOR UPDATE SKIP
+/// LOCKED) so several API instances never run the same occurrence.
+model NotificationSchedule {
+  id              String                    @id @default(cuid())
+  shopkeeperId    String
+  shopkeeper      Shopkeeper                @relation(fields: [shopkeeperId], references: [id], onDelete: Cascade)
+  roomId          String
+  room            Room                      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  designVersionId String
+  designVersion   NotificationDesignVersion @relation(fields: [designVersionId], references: [id], onDelete: Restrict)
+  message         String?
+
+  includeMembers       Boolean @default(true)
+  includeNearby        Boolean @default(false)
+  radiusKm             Int     @default(10)
+  includeFutureMembers Boolean @default(true)
+
+  timeZone      String
+  firstRunAt    DateTime
+  recurrence    ScheduleRecurrence @default(ONCE)
+  repeatEvery   Int                @default(1)
+  weekdays      Int[]
+  endMode       ScheduleEndMode    @default(NEVER)
+  endDate       String? // "YYYY-MM-DD" in timeZone, inclusive
+  endAfter      Int?
+  deliverySpeed DeliverySpeed      @default(STANDARD)
+
+  status      ScheduleStatus @default(ACTIVE)
+  nextRunAt   DateTime?
+  lastRunAt   DateTime?
+  runCount    Int            @default(0)
+  lockedUntil DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  sends NotificationSend[]
+
+  @@index([status, nextRunAt])
+  @@index([shopkeeperId, status])
+  @@index([roomId])
+  @@index([designVersionId])
 }

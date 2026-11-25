@@ -13,8 +13,14 @@
 
 import type { Server as HTTPServer } from "http";
 import { Server as SocketIOServer, type Socket } from "socket.io";
+import { allowedOrigins } from "../config/env.js";
 import { verifyCustomerToken, verifyShopkeeperToken } from "../utils/jwt.js";
+import { isAllowedOrigin, readSessionCookie } from "../lib/sessionCookie.js";
 import { prisma } from "../database/prisma.js";
+import { isSessionActive } from "../services/session.service.js";
+import { socketConnections } from "../lib/metrics.js";
+import { withNewRequestId } from "../lib/requestContext.js";
+import { logger } from "../lib/logger.js";
 import {
   assertRoomAccess,
   createMessage,
@@ -122,9 +128,50 @@ function isRateLimited(socketId: string): boolean {
   return recent.length > RATE_LIMIT_MAX_MESSAGES;
 }
 
+/**
+ * Online-list broadcasts are coalesced per room. Every join or leave used to push
+ * the whole list to the whole room immediately, so N people opening a room at
+ * once (say, right after a push notification) cost O(N²) messages and delayed
+ * real chat traffic by seconds. Now at most one broadcast per room per window
+ * goes out, carrying the latest list.
+ */
+export const PRESENCE_WINDOW_MS = 500;
+const presenceTimers = new Map<string, NodeJS.Timeout>();
+
 function emitPresence(io: AppServer, roomId: string) {
-  const ids = Array.from(presenceByRoom.get(roomId) ?? []);
-  io.to(roomId).emit("presence:update", { roomId, onlineCustomerIds: ids });
+  if (presenceTimers.has(roomId)) return;
+  const timer = setTimeout(() => {
+    presenceTimers.delete(roomId);
+    const ids = Array.from(presenceByRoom.get(roomId) ?? []);
+    io.to(roomId).emit("presence:update", { roomId, onlineCustomerIds: ids });
+  }, PRESENCE_WINDOW_MS);
+  timer.unref();
+  presenceTimers.set(roomId, timer);
+}
+
+/** Room and message ids are short opaque strings; anything else is a malformed event. */
+function isId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 64;
+}
+
+/**
+ * Errors the chat service throws on purpose, with messages written for users.
+ * Anything else (a database or driver error) is replaced by a generic message
+ * so internals never travel to the client.
+ */
+const USER_FACING_ERRORS = new Set([
+  "Message not found",
+  "Not your message",
+  "Message was deleted",
+  "This message can no longer be edited",
+  "This message can no longer be deleted",
+  "Invalid reaction",
+  "Room not found",
+  "Access denied",
+]);
+
+function clientMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && USER_FACING_ERRORS.has(err.message) ? err.message : fallback;
 }
 
 function senderIdOf(data: SocketData): string {
@@ -145,7 +192,13 @@ let ioInstance: AppServer | null = null;
 
 export function createSocketServer(httpServer: HTTPServer): AppServer {
   const io: AppServer = new SocketIOServer(httpServer, {
-    cors: { origin: true, credentials: true },
+    cors: {
+      origin(origin, callback) {
+        const allowed = allowedOrigins();
+        callback(null, !origin || allowed === null || allowed.includes(origin));
+      },
+      credentials: true,
+    },
     // Snappier stale-connection detection than the 25s/20s defaults, so a
     // closed tab clears its "online" presence in seconds, not tens of seconds.
     pingInterval: 10_000,
@@ -153,10 +206,18 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
   });
 
   io.use(async (socket, next) => {
-    const { token, role } = socket.handshake.auth as {
+    const { token: given, role } = socket.handshake.auth as {
       token?: string;
       role?: "customer" | "shopkeeper";
     };
+    // A browser relying on its HttpOnly session cookie sends no token: read the cookie instead. WebSockets
+    // are not bound by CORS, so a cookie-authenticated connection must also come from an allowed origin.
+    const fromCookie = role === "customer" || role === "shopkeeper" ? readSessionCookie(socket.handshake, role) : null;
+    if (!given && fromCookie && !isAllowedOrigin(socket.handshake.headers.origin)) {
+      next(new Error("Unauthorized"));
+      return;
+    }
+    const token = given || fromCookie;
     if (!token || !role) {
       next(new Error("Missing auth"));
       return;
@@ -165,6 +226,9 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
     try {
       if (role === "customer") {
         const payload = verifyCustomerToken(token);
+        if (!(await isSessionActive("customer", payload.sub, payload.tv))) {
+          throw new Error("Session revoked");
+        }
         const customer = await prisma.customer.findUnique({
           where: { id: payload.sub },
           select: { fullName: true },
@@ -175,6 +239,9 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
         socket.data.typingRooms = new Set();
       } else if (role === "shopkeeper") {
         const payload = verifyShopkeeperToken(token);
+        if (!(await isSessionActive("shopkeeper", payload.sub, payload.tv))) {
+          throw new Error("Session revoked");
+        }
         const shopkeeper = await prisma.shopkeeper.findUnique({
           where: { id: payload.sub },
           select: { ownerName: true },
@@ -199,6 +266,27 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
     const myViewerKey = viewerKeyOf(ctx);
 
     socket.join(personalRoom(myViewerKey));
+    socketConnections.inc();
+
+    /**
+     * Registers a client event handler that runs under its own correlation id, so
+     * everything one event triggers (queries, errors) can be found by one id.
+     */
+    function listen<E extends keyof ClientToServerEvents>(event: E, handler: ClientToServerEvents[E]): void {
+      const run = handler as unknown as (...args: unknown[]) => unknown;
+      const wrapped = (...args: unknown[]) =>
+        withNewRequestId("ws", () => {
+          try {
+            const result = run(...args);
+            if (result instanceof Promise) {
+              result.catch((err: unknown) => logger.error("Socket handler failed", err, { event }));
+            }
+          } catch (err) {
+            logger.error("Socket handler failed", err, { event });
+          }
+        });
+      (socket.on as unknown as (e: string, l: unknown) => void).call(socket, event, wrapped);
+    }
 
     function stopTyping(roomId: string) {
       if (!socket.data.typingRooms.has(roomId)) return;
@@ -211,11 +299,12 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
       });
     }
 
-    socket.on("room:join", async ({ roomId }) => {
-      if (!roomId) return;
+    listen("room:join", async ({ roomId }) => {
+      if (!isId(roomId)) return;
       try {
         await assertRoomAccess(roomId, ctx);
-      } catch {
+      } catch (err) {
+        logger.warn("Socket room join denied", { roomId }, err);
         socket.emit("error", { message: "Access denied" });
         return;
       }
@@ -238,8 +327,8 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
       }
     });
 
-    socket.on("room:leave", ({ roomId }) => {
-      if (!roomId) return;
+    listen("room:leave", ({ roomId }) => {
+      if (!isId(roomId)) return;
       socket.leave(roomId);
       if (socket.data.customerId) {
         presenceByRoom.get(roomId)?.delete(socket.data.customerId);
@@ -248,8 +337,9 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
       stopTyping(roomId);
     });
 
-    socket.on("message:send", async ({ roomId, text, replyToId }) => {
-      if (!roomId || typeof text !== "string") return;
+    listen("message:send", async ({ roomId, text, replyToId }) => {
+      if (!isId(roomId) || typeof text !== "string") return;
+      if (replyToId !== undefined && !isId(replyToId)) return;
       const trimmed = text.trim();
       if (!trimmed || trimmed.length > 2000) {
         socket.emit("error", {
@@ -267,13 +357,14 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
         await assertRoomAccess(roomId, ctx);
         const message = await createMessage(roomId, trimmed, ctx, replyToId);
         io.to(roomId).emit("message:new", message);
-      } catch {
+      } catch (err) {
+        logger.warn("Socket message send failed", { roomId }, err);
         socket.emit("error", { message: "Could not send message" });
       }
     });
 
-    socket.on("message:edit", async ({ roomId, messageId, text }) => {
-      if (!roomId || !messageId || typeof text !== "string") return;
+    listen("message:edit", async ({ roomId, messageId, text }) => {
+      if (!isId(roomId) || !isId(messageId) || typeof text !== "string") return;
       const trimmed = text.trim();
       if (!trimmed || trimmed.length > 2000) {
         socket.emit("error", { message: "Message must be 1-2000 characters" });
@@ -285,53 +376,52 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
       }
       try {
         await assertRoomAccess(roomId, ctx);
-        const updated = await editMessage(messageId, trimmed, ctx);
+        const updated = await editMessage(roomId, messageId, trimmed, ctx);
         io.to(roomId).emit("message:updated", updated);
       } catch (err) {
-        socket.emit("error", {
-          message: err instanceof Error ? err.message : "Could not edit message",
-        });
+        logger.warn("Socket message edit failed", { roomId }, err);
+        socket.emit("error", { message: clientMessage(err, "Could not edit message") });
       }
     });
 
-    socket.on("message:delete", async ({ roomId, messageId, scope }) => {
-      if (!roomId || !messageId || (scope !== "everyone" && scope !== "me")) return;
+    listen("message:delete", async ({ roomId, messageId, scope }) => {
+      if (!isId(roomId) || !isId(messageId) || (scope !== "everyone" && scope !== "me")) return;
       if (isRateLimited(socket.id)) {
         socket.emit("error", { message: "You're sending messages too fast" });
         return;
       }
       try {
         await assertRoomAccess(roomId, ctx);
-        await deleteMessage(messageId, scope, ctx);
+        await deleteMessage(roomId, messageId, scope, ctx);
         if (scope === "everyone") {
           io.to(roomId).emit("message:deleted", { roomId, messageId });
         } else {
           socket.emit("message:removed", { roomId, messageId });
         }
       } catch (err) {
-        socket.emit("error", {
-          message: err instanceof Error ? err.message : "Could not delete message",
-        });
+        logger.warn("Socket message delete failed", { roomId }, err);
+        socket.emit("error", { message: clientMessage(err, "Could not delete message") });
       }
     });
 
-    socket.on("message:react", async ({ roomId, messageId, emoji }) => {
-      if (!roomId || !messageId || typeof emoji !== "string" || !emoji) return;
+    listen("message:react", async ({ roomId, messageId, emoji }) => {
+      if (!isId(roomId) || !isId(messageId) || typeof emoji !== "string" || !emoji) return;
       if (isRateLimited(socket.id)) {
         socket.emit("error", { message: "You're sending messages too fast" });
         return;
       }
       try {
         await assertRoomAccess(roomId, ctx);
-        const reactions = await reactToMessage(messageId, emoji, ctx);
+        const reactions = await reactToMessage(roomId, messageId, emoji, ctx);
         io.to(roomId).emit("message:reacted", { roomId, messageId, reactions });
-      } catch {
+      } catch (err) {
+        logger.warn("Socket reaction failed", { roomId }, err);
         socket.emit("error", { message: "Could not react to message" });
       }
     });
 
-    socket.on("room:read", async ({ roomId, at }) => {
-      if (!roomId || !at) return;
+    listen("room:read", async ({ roomId, at }) => {
+      if (!isId(roomId) || typeof at !== "string") return;
       const atDate = new Date(at);
       if (Number.isNaN(atDate.getTime())) return;
       try {
@@ -348,19 +438,22 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
       }
     });
 
-    socket.on("chat:clear", async ({ roomId }) => {
-      if (!roomId) return;
+    listen("chat:clear", async ({ roomId }) => {
+      if (!isId(roomId)) return;
       try {
         await assertRoomAccess(roomId, ctx);
         const clearedAt = await clearRoomForViewer(roomId, ctx);
         socket.emit("chat:cleared", { roomId, clearedAt: clearedAt.toISOString() });
-      } catch {
+      } catch (err) {
+        logger.warn("Socket chat clear failed", { roomId }, err);
         socket.emit("error", { message: "Could not clear chat" });
       }
     });
 
-    socket.on("typing:start", ({ roomId }) => {
-      if (!roomId) return;
+    listen("typing:start", ({ roomId }) => {
+      // Only rooms this socket was admitted to (room:join checks membership);
+      // otherwise anyone could spoof "X is typing" into a room they can't see.
+      if (!isId(roomId) || !socket.rooms.has(roomId)) return;
       socket.data.typingRooms.add(roomId);
       socket.to(roomId).emit("typing:update", {
         roomId,
@@ -370,12 +463,13 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
       });
     });
 
-    socket.on("typing:stop", ({ roomId }) => {
-      if (!roomId) return;
+    listen("typing:stop", ({ roomId }) => {
+      if (!isId(roomId)) return;
       stopTyping(roomId);
     });
 
     socket.on("disconnect", () => {
+      socketConnections.dec();
       for (const roomId of socket.data.typingRooms) stopTyping(roomId);
       if (socket.data.customerId) {
         for (const [roomId, ids] of presenceByRoom) {
@@ -388,6 +482,31 @@ export function createSocketServer(httpServer: HTTPServer): AppServer {
 
   ioInstance = io;
   return io;
+}
+
+/** Drops every live connection of one participant (account deleted or signed out everywhere). */
+export function disconnectViewer(viewerKey: string): void {
+  ioInstance?.in(personalRoom(viewerKey)).disconnectSockets(true);
+}
+
+/**
+ * Takes a customer out of a room's live channel after they leave it or their
+ * account is deleted — otherwise their open sockets would keep receiving the
+ * room's messages — and tells the remaining participants.
+ */
+export function removeViewerFromRoom(customerId: string, roomId: string): void {
+  if (!ioInstance) return;
+  ioInstance.in(personalRoom(customerId)).socketsLeave(roomId);
+  presenceByRoom.get(roomId)?.delete(customerId);
+  emitPresence(ioInstance, roomId);
+  ioInstance.to(roomId).emit("member:left", { roomId, customerId });
+}
+
+/** Empties a room's live channel (its shop was deleted). */
+export function closeRoom(roomId: string): void {
+  if (!ioInstance) return;
+  ioInstance.in(roomId).socketsLeave(roomId);
+  presenceByRoom.delete(roomId);
 }
 
 /** The Socket.IO singleton — used by the REST POST endpoint to broadcast

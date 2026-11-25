@@ -1,48 +1,85 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
-import bcrypt from "bcrypt";
 import {
   initShopkeeperDraft,
   updateShopkeeperDraft,
   sendPhoneOtp,
   verifyPhoneOtp,
-  createOrder,
-  verifyPaymentAndRegister,
+  assertDraftActive,
 } from "../services/shopkeeper.service.js";
 import { uploadLogoToCloudinary } from "../lib/cloudinary.js";
 import { validatePhoneNumber } from "../lib/phoneValidation.js";
 import { VerifyError } from "../lib/twilioVerify.js";
-import { verifyWebhookSignature } from "../lib/razorpay.js";
-import { signShopkeeperToken } from "../utils/jwt.js";
+import { signMfaPendingToken, signShopkeeperToken } from "../utils/jwt.js";
 import { prisma } from "../database/prisma.js";
+import { imageDataUriSchema } from "../schemas/imageUpload.schema.js";
+import { newPasswordSchema, needsRehash, hashPassword, verifyPassword } from "../utils/password.js";
+import { RegistrationError } from "../utils/registrationError.js";
+import { NotificationError } from "../utils/notificationError.js";
+import { PaymentError } from "../utils/paymentError.js";
+import { revokeSessions } from "../services/session.service.js";
+import { deleteShopkeeperAccount } from "../services/shopkeeperAccount.service.js";
+import { disconnectViewer } from "../realtime/socket.js";
+import { logger } from "../lib/logger.js";
+import { recordSecurityEvent } from "../services/securityEvent.service.js";
+import { isMfaEnabled } from "../services/mfa.service.js";
+import { clearSessionCookie, sendSession } from "../lib/sessionCookie.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
- * Prevents raw Prisma / DB error details from leaking to the client.
- * Prisma errors carry a name like "PrismaClientValidationError" or a P-code.
+ * Only errors written to be read by users (RegistrationError, VerifyError,
+ * NotificationError) pass their message through. Everything else — Prisma,
+ * network, SDK failures — may carry hostnames, SQL or stack details, so the
+ * client gets the generic fallback instead.
  */
 export function safeMessage(
   err: unknown,
   fallback = "Something went wrong. Please try again.",
 ): string {
-  const e = err as { name?: string; code?: string; message?: string };
-  if (typeof e?.name === "string" && e.name.startsWith("PrismaClient"))
-    return fallback;
-  if (typeof e?.code === "string" && /^P\d{4}$/.test(e.code)) return fallback;
-  return e?.message ?? fallback;
+  if (
+    err instanceof RegistrationError ||
+    err instanceof VerifyError ||
+    err instanceof NotificationError ||
+    err instanceof PaymentError
+  ) {
+    return err.message;
+  }
+  return fallback;
 }
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
 const draftInitSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(254),
-  password: z.string().min(8).max(200),
+  password: newPasswordSchema,
 });
+
+/**
+ * The shop details a client may write to its draft. Unknown keys are dropped,
+ * so a client can never set the server-managed fields (phoneNumber, which only
+ * changes through the OTP flow, and logoUrl, which only comes from our upload).
+ */
+const draftDataSchema = z
+  .object({
+    shopName: z.string().trim().min(2).max(120),
+    shopCategory: z.string().trim().min(2).max(60),
+    address: z.string().trim().min(2).max(200),
+    city: z.string().trim().min(2).max(100),
+    state: z.string().trim().min(2).max(100),
+    pincode: z.string().regex(/^\d{6}$/),
+    shopAddress: z.string().trim().max(400),
+    description: z.string().trim().max(1000),
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
+  })
+  .partial();
+
+const draftIdSchema = z.string().min(1).max(64);
 
 const draftUpdateSchema = z.object({
   step: z.number().int().min(1).max(4),
-  data: z.record(z.string(), z.unknown()),
+  data: draftDataSchema,
 });
 
 const phoneSchema = z.object({
@@ -55,36 +92,18 @@ const phoneSchema = z.object({
 });
 
 const sendOtpSchema = z.object({
-  draftId: z.string().min(1),
+  draftId: draftIdSchema,
   phoneNumber: z.string().regex(/^[6-9]\d{9}$/, "Invalid Indian mobile number"),
 });
 
 const verifyOtpSchema = z.object({
-  draftId: z.string().min(1),
+  draftId: draftIdSchema,
   code: z.string().length(6),
 });
 
-const createOrderSchema = z.object({
-  draftId: z.string().min(1),
-  planType: z.enum(["1m", "2m", "3m"]),
-});
-
-const verifyPaymentSchema = z.object({
-  draftId: z.string().min(1),
-  planType: z.enum(["1m", "2m", "3m"]),
-  razorpayOrderId: z.string().min(1),
-  razorpayPaymentId: z.string().min(1),
-  razorpaySignature: z.string().min(1),
-});
-
 const uploadLogoSchema = z.object({
-  draftId: z.string().min(1),
-  image: z
-    .string()
-    .refine(
-      (s) => /^data:image\/(jpeg|jpg|png|webp);base64,/.test(s),
-      "Only JPEG, PNG, or WebP images are accepted",
-    ),
+  draftId: draftIdSchema,
+  image: imageDataUriSchema,
 });
 
 const loginSchema = z.object({
@@ -107,7 +126,7 @@ export async function initDraft(req: Request, res: Response): Promise<void> {
     );
     res.json(result);
   } catch (err) {
-    console.error("Draft init:", (err as Error)?.message);
+    logger.error("Draft init", err);
     res
       .status(400)
       .json({
@@ -125,15 +144,20 @@ export async function updateDraft(req: Request, res: Response): Promise<void> {
     res.status(400).json({ message: "Invalid request" });
     return;
   }
+  const draftId = draftIdSchema.safeParse(req.params.draftId);
+  if (!draftId.success) {
+    res.status(400).json({ message: "Invalid request" });
+    return;
+  }
   try {
     await updateShopkeeperDraft(
-      req.params.draftId as string,
+      draftId.data,
       parsed.data.step,
       parsed.data.data,
     );
     res.json({ message: "Draft updated" });
   } catch (err) {
-    console.error("Draft update:", (err as Error)?.message);
+    logger.error("Draft update", err);
     res
       .status(400)
       .json({
@@ -168,7 +192,7 @@ export async function validatePhone(
       carrier: result.carrier,
     });
   } catch (err) {
-    console.error("Phone validate:", (err as Error)?.message);
+    logger.error("Phone validate", err);
     res.status(500).json({ message: "Validation failed, please try again" });
   }
 }
@@ -188,7 +212,7 @@ export async function sendPhoneOtpHandler(
     await sendPhoneOtp(parsed.data.draftId, parsed.data.phoneNumber);
     res.json({ message: "OTP sent" });
   } catch (err) {
-    console.error("Phone OTP send:", (err as Error)?.message);
+    logger.error("Phone OTP send", err);
     if (err instanceof VerifyError) {
       res.status(422).json({ message: err.message });
       return;
@@ -226,134 +250,13 @@ export async function verifyPhoneOtpHandler(
       res.status(422).json({ message: err.message });
       return;
     }
-    console.error("OTP verify:", (err as Error)?.message);
+    logger.error("OTP verify", err);
     res
       .status(400)
       .json({
         message: safeMessage(err, "Verification failed. Please try again."),
       });
   }
-}
-
-export async function createPaymentOrder(
-  req: Request,
-  res: Response,
-): Promise<void> {
-  const parsed = createOrderSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ message: "Invalid request" });
-    return;
-  }
-  try {
-    const result = await createOrder(parsed.data.draftId, parsed.data.planType);
-    res.json(result);
-  } catch (err) {
-    console.error("Create order:", (err as Error)?.message);
-    res
-      .status(400)
-      .json({
-        message: safeMessage(err, "Failed to create order. Please try again."),
-      });
-  }
-}
-
-export async function verifyPayment(
-  req: Request,
-  res: Response,
-): Promise<void> {
-  const parsed = verifyPaymentSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ message: "Invalid request" });
-    return;
-  }
-  try {
-    const registration = await verifyPaymentAndRegister(
-      parsed.data.draftId,
-      parsed.data.razorpayOrderId,
-      parsed.data.razorpayPaymentId,
-      parsed.data.razorpaySignature,
-      parsed.data.planType,
-    );
-    res.json({
-      message: "Payment verified. Registration complete.",
-      token: signShopkeeperToken(registration.shopkeeperId),
-      shopkeeperId: registration.shopkeeperId,
-      shopId: registration.shopId,
-      roomId: registration.roomId,
-      inviteCode: registration.inviteCode,
-      inviteLink: registration.inviteLink,
-    });
-  } catch (err) {
-    console.error("Payment verify:", (err as Error)?.message);
-    const e = err as Error;
-    const isBadRequest =
-      e?.message?.includes("signature") ||
-      e?.message?.includes("Draft") ||
-      e?.message?.includes("not verified") ||
-      e?.message?.includes("expired");
-    res
-      .status(isBadRequest ? 400 : 500)
-      .json({
-        message: safeMessage(
-          err,
-          "Payment verification failed. Please try again.",
-        ),
-      });
-  }
-}
-
-export async function handleWebhook(
-  req: Request,
-  res: Response,
-): Promise<void> {
-  const signature = req.headers["x-razorpay-signature"];
-  const rawBody = (req as Request & { rawBody?: string }).rawBody;
-
-  if (typeof signature !== "string" || !rawBody) {
-    res.status(400).json({ message: "Missing signature or body" });
-    return;
-  }
-
-  if (!verifyWebhookSignature(rawBody, signature)) {
-    console.warn("[Webhook] Invalid signature — ignoring event");
-    res.status(401).json({ message: "Invalid webhook signature" });
-    return;
-  }
-
-  let event: {
-    event: string;
-    payload: {
-      payment?: {
-        entity?: { id?: string; amount?: number; error_description?: string };
-      };
-    };
-  };
-  try {
-    event = JSON.parse(rawBody);
-  } catch {
-    res.status(400).json({ message: "Invalid JSON body" });
-    return;
-  }
-
-  const eventType = event?.event;
-  const payment = event?.payload?.payment?.entity;
-
-  switch (eventType) {
-    case "payment.captured":
-      console.log(
-        `[Webhook] payment.captured — paymentId: ${payment?.id}, amount: ₹${(payment?.amount ?? 0) / 100}`,
-      );
-      break;
-    case "payment.failed":
-      console.warn(
-        `[Webhook] payment.failed — paymentId: ${payment?.id}, reason: ${payment?.error_description}`,
-      );
-      break;
-    default:
-      console.log(`[Webhook] Unhandled event: ${eventType}`);
-  }
-
-  res.json({ received: true });
 }
 
 export async function uploadLogo(req: Request, res: Response): Promise<void> {
@@ -365,14 +268,16 @@ export async function uploadLogo(req: Request, res: Response): Promise<void> {
     return;
   }
   try {
+    // Check the draft first so strangers can't use this endpoint as a free image host.
+    await assertDraftActive(parsed.data.draftId);
     const logoUrl = await uploadLogoToCloudinary(parsed.data.image);
     await updateShopkeeperDraft(parsed.data.draftId, 2, { logoUrl });
     res.json({ logoUrl });
   } catch (err) {
-    console.error("Logo upload:", (err as Error)?.message);
+    logger.error("Logo upload", err);
     res
-      .status(500)
-      .json({ message: "Failed to upload logo. Please try again." });
+      .status(err instanceof RegistrationError ? err.status : 500)
+      .json({ message: safeMessage(err, "Failed to upload logo. Please try again.") });
   }
 }
 
@@ -388,26 +293,80 @@ export async function loginShopkeeper(
   try {
     const shopkeeper = await prisma.shopkeeper.findUnique({
       where: { email: parsed.data.email },
+      select: { id: true, shopName: true, passwordHash: true, tokenVersion: true },
     });
-    if (!shopkeeper) {
+    // Compares even when the email is unknown, so timing doesn't reveal which emails exist.
+    const valid = await verifyPassword(parsed.data.password, shopkeeper?.passwordHash);
+    if (!shopkeeper || !valid) {
+      recordSecurityEvent(req, { type: "LOGIN_FAILED", role: "SHOPKEEPER", actorId: shopkeeper?.id, detail: { method: "password" } });
       res.status(401).json({ message: "Invalid email or password" });
       return;
     }
-    const valid = await bcrypt.compare(
-      parsed.data.password,
-      shopkeeper.passwordHash,
-    );
-    if (!valid) {
-      res.status(401).json({ message: "Invalid email or password" });
+    if (needsRehash(shopkeeper.passwordHash)) {
+      // Best effort: failing to upgrade the hash must not fail the login.
+      await hashPassword(parsed.data.password)
+        .then((passwordHash) =>
+          prisma.shopkeeper.update({ where: { id: shopkeeper.id }, data: { passwordHash } }),
+        )
+        .catch(() => undefined);
+    }
+    if (await isMfaEnabled("SHOPKEEPER", shopkeeper.id)) {
+      res.json({ mfaRequired: true, mfaToken: signMfaPendingToken("SHOPKEEPER", shopkeeper.id, shopkeeper.tokenVersion) });
       return;
     }
-    res.json({
-      token: signShopkeeperToken(shopkeeper.id),
+    recordSecurityEvent(req, { type: "LOGIN_SUCCESS", role: "SHOPKEEPER", actorId: shopkeeper.id, detail: { method: "password" } });
+    sendSession(req, res, "shopkeeper", signShopkeeperToken(shopkeeper.id, shopkeeper.tokenVersion), {
       shopkeeperId: shopkeeper.id,
       shopName: shopkeeper.shopName,
     });
   } catch (err) {
-    console.error("Shopkeeper login:", (err as Error)?.message);
+    logger.error("Shopkeeper login", err);
     res.status(500).json({ message: "Login failed. Please try again." });
+  }
+}
+
+// ── POST /api/shopkeeper/logout-all ───────────────────────────────────────────
+// Invalidates every session of the account, including the one making the call.
+
+export async function logoutAllShopkeeperHandler(req: Request, res: Response): Promise<void> {
+  await revokeSessions("shopkeeper", req.shopkeeperId!);
+  recordSecurityEvent(req, { type: "SESSIONS_REVOKED", role: "SHOPKEEPER", actorId: req.shopkeeperId });
+  disconnectViewer(`SK:${req.shopkeeperId}`);
+  clearSessionCookie(res, "shopkeeper");
+  res.json({ message: "Signed out everywhere" });
+}
+
+// ── DELETE /api/shopkeeper/me ─────────────────────────────────────────────────
+// Permanently deletes the shopkeeper, their shop and room, and all of their
+// notification data. Requires the account password again.
+
+const deleteAccountSchema = z.object({ password: z.string().min(1).max(200) });
+
+export async function deleteShopkeeperAccountHandler(req: Request, res: Response): Promise<void> {
+  const shopkeeperId = req.shopkeeperId!;
+  const parsed = deleteAccountSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ message: "Password is required" });
+    return;
+  }
+
+  try {
+    const shopkeeper = await prisma.shopkeeper.findUnique({
+      where: { id: shopkeeperId },
+      select: { passwordHash: true },
+    });
+    const confirmed = await verifyPassword(parsed.data.password, shopkeeper?.passwordHash);
+    if (!shopkeeper || !confirmed) {
+      recordSecurityEvent(req, { type: "REAUTH_FAILED", role: "SHOPKEEPER", actorId: shopkeeperId, detail: { action: "delete_account" } });
+      res.status(403).json({ message: "Could not confirm your identity" });
+      return;
+    }
+
+    await deleteShopkeeperAccount(shopkeeperId);
+    disconnectViewer(`SK:${shopkeeperId}`);
+    res.json({ message: "Your account has been deleted" });
+  } catch (err) {
+    logger.error("Shopkeeper delete", err);
+    res.status(500).json({ message: "Could not delete the account. Please try again." });
   }
 }

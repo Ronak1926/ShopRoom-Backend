@@ -1,5 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { verifyCustomerToken } from "../utils/jwt.js";
+import { isSessionActive } from "../services/session.service.js";
+import { tokenFor } from "./sessionToken.js";
 
 declare global {
   namespace Express {
@@ -9,23 +11,32 @@ declare global {
   }
 }
 
-export function requireCustomerAuth(
+export async function requireCustomerAuth(
   req: Request,
   res: Response,
   next: NextFunction,
 ) {
-  const header = req.header("authorization");
-  if (!header || !header.toLowerCase().startsWith("bearer ")) {
-    return res.status(401).json({ message: "Missing Authorization header" });
+  const source = tokenFor(req, "customer");
+  if ("rejected" in source) {
+    if (source.rejected === "cross-site") res.status(403).json({ message: "This request is not allowed from this origin" });
+    else res.status(401).json({ message: "Missing Authorization header" });
+    return;
   }
+  const token = source.token;
 
-  const token = header.slice("bearer ".length).trim();
-
+  let payload;
   try {
-    const payload = verifyCustomerToken(token);
-    req.customerId = payload.sub;
-    next();
+    payload = verifyCustomerToken(token);
   } catch {
-    return res.status(401).json({ message: "Invalid token" });
+    res.status(401).json({ message: "Invalid token" });
+    return;
   }
+
+  if (!(await isSessionActive("customer", payload.sub, payload.tv))) {
+    res.status(401).json({ message: "Invalid token" });
+    return;
+  }
+
+  req.customerId = payload.sub;
+  next();
 }

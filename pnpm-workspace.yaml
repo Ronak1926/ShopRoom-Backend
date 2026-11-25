@@ -3,3 +3,11 @@ onlyBuiltDependencies:
   - '@prisma/engines'
   - esbuild
   - prisma
+
+overrides:
+  # firebase-admin > firestore > google-gax pulls uuid 9 (GHSA-w5hq-g745-h8pq). uuid 11 keeps the CommonJS entry point it needs.
+  uuid@<11.1.1: ">=11.1.1 <12"
+  # prisma CLI > @prisma/config > effect: ReDoS in Schema.TemplateLiteral (GHSA-7589-6fvf-x4pw), patched in 3.22.1.
+  effect@<3.22.1: ">=3.22.1 <4"
+  # firebase-admin > @google-cloud/storage > fast-xml-parser: quadratic CPU use (GHSA-474x-hrwr-fgx4), patched in 5.12.0.
+  fast-xml-parser@<5.12.0: ">=5.12.0 <6"

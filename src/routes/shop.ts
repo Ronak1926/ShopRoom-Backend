@@ -12,6 +12,7 @@
 import { Router } from "express";
 import { requireShopkeeperAuth } from "../middleware/shopkeeperAuth.js";
 import { requireCustomerAuth } from "../middleware/customerAuth.js";
+import { invitePreviewLimiter } from "../middleware/rateLimiters.js";
 import {
   getMyShop,
   getShopDashboard,
@@ -52,7 +53,7 @@ shopRouter.patch("/room/images", requireShopkeeperAuth, updateRoomImages);
  * Returns a shop preview for an invite link.
  * No auth required — shown to anyone who follows a /join/:code URL.
  */
-shopRouter.get("/invite/:code", getInvitePreview);
+shopRouter.get("/invite/:code", invitePreviewLimiter, getInvitePreview);
 
 // ─── Customer-authenticated ───────────────────────────────────────────────────
 

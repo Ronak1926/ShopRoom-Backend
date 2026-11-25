@@ -1,0 +1,8 @@
+#!/bin/sh
+# Runs before every commit (enabled by `pnpm install`, which sets core.hooksPath).
+# Fails the commit if the project does not type-check.
+# Skip in an emergency with `git commit --no-verify`; CI runs the same check.
+set -e
+
+echo "pre-commit: type-checking…"
+pnpm exec tsc --noEmit -p tsconfig.json

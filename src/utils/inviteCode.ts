@@ -1,3 +1,6 @@
+import { randomInt } from "node:crypto";
+import { logger } from "../lib/logger.js";
+
 /**
  * utils/inviteCode.ts — Unique invite code generation with collision prevention.
  *
@@ -25,16 +28,12 @@ type TxClient = Omit<
 >;
 
 /**
- * Generates a cryptographically random invite code character.
- *
- * Uses Math.random() — sufficient for non-security-critical invite codes.
- * If codes ever need to be unguessable secrets, swap in crypto.randomInt.
+ * A random invite code. The code is what lets someone into a room, so it comes from the
+ * operating system's CSPRNG (randomInt is unbiased) rather than Math.random(), whose output
+ * can be predicted from a few observed values.
  */
 function randomCode(): string {
-  return Array.from(
-    { length: CODE_LENGTH },
-    () => CHARS[Math.floor(Math.random() * CHARS.length)],
-  ).join("");
+  return Array.from({ length: CODE_LENGTH }, () => CHARS[randomInt(CHARS.length)]).join("");
 }
 
 /**
@@ -48,7 +47,7 @@ export async function generateUniqueInviteCode(tx: TxClient): Promise<string> {
     const code = randomCode();
     const existing = await tx.room.findUnique({ where: { inviteCode: code } });
     if (!existing) return code;
-    console.warn(`[inviteCode] collision on attempt ${attempt}: ${code}`);
+    logger.warn("Invite code collision", { attempt });
   }
 
   throw new Error(
@@ -60,7 +59,7 @@ export async function generateUniqueInviteCode(tx: TxClient): Promise<string> {
  * Builds the shareable invite URL.
  *
  * @param code       — The 8-char invite code.
- * @param baseUrl    — e.g. "https://shoproom.com". Defaults to env var or localhost.
+ * @param baseUrl    — e.g. "https://countercircle.com". Defaults to env var or localhost.
  */
 export function buildInviteLink(code: string, baseUrl?: string): string {
   const base =

@@ -20,7 +20,10 @@ let cachedKey: Buffer | null = null;
 
 function getKey(): Buffer {
   if (cachedKey) return cachedKey;
-  const secret = process.env.JWT_SECRET;
+  // MESSAGE_ENCRYPTION_KEY lets JWT_SECRET be rotated without making stored
+  // chat history undecryptable; set it to the current JWT_SECRET value before
+  // rotating. Existing deployments that never set it keep deriving from JWT_SECRET.
+  const secret = process.env.MESSAGE_ENCRYPTION_KEY || process.env.JWT_SECRET;
   if (!secret) throw new Error("JWT_SECRET is not defined");
   cachedKey = crypto.scryptSync(secret, "shoproom-message-encryption-v1", 32);
   return cachedKey;

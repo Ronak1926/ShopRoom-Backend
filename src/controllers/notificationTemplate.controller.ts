@@ -11,7 +11,7 @@ import {
 import { ListTemplatesQuerySchema } from "../schemas/notificationRequests.schema.js";
 import { handleControllerError, requireIdParam } from "./notificationResponse.js";
 
-// GET /api/notifications/templates?categoryId=&q=&sort=&page=&limit=
+// GET /api/notifications/templates?categoryId=&ids=&q=&sort=&page=&limit=
 export async function listTemplates(req: Request, res: Response): Promise<void> {
   const parsed = ListTemplatesQuerySchema.safeParse(req.query);
   if (!parsed.success) {
@@ -32,6 +32,7 @@ export async function getTemplate(req: Request, res: Response): Promise<void> {
   try {
     const id = requireIdParam(req.params.id);
     const template = await getTemplateService(id);
+    res.set("Cache-Control", "private, max-age=300");
     res.json({ data: template });
   } catch (err) {
     handleControllerError(res, err, "Failed to fetch template");

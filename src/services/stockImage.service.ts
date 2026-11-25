@@ -9,6 +9,7 @@ import { isPexelsConfigured, searchPexels } from "../lib/pexels.js";
 import { isUnsplashConfigured, searchUnsplash } from "../lib/unsplash.js";
 import { ProviderNotConfiguredError, type StockImageResult } from "../lib/stockImageTypes.js";
 import type { StockImageSearchQuery } from "../schemas/notificationRequests.schema.js";
+import { logger } from "../lib/logger.js";
 
 /** Providers that currently have an API key set — drives the Stock tab's setup hint. */
 export function configuredProviders(): ("PEXELS" | "UNSPLASH")[] {
@@ -29,7 +30,7 @@ export async function searchStockImages(
   const searches = providers.map((p) =>
     (p === "PEXELS" ? searchPexels(query, input.page) : searchUnsplash(query, input.page)).catch((err) => {
       if (!(err instanceof ProviderNotConfiguredError)) {
-        console.error(`Stock image search failed (${p}):`, (err as { message?: string })?.message);
+        logger.error("Stock image search failed (${p})", err);
       }
       return { items: [] as StockImageResult[], hasMore: false };
     }),

@@ -1,5 +1,5 @@
 /**
- * services/notificationTemplate.service.ts — ShopRoom-provided starting designs.
+ * services/notificationTemplate.service.ts — CounterCircle-provided starting designs.
  *
  * A template is just an initial design. Cloning it produces a shopkeeper-owned
  * NotificationDesign; the template itself is never mutated (master plan §22).
@@ -10,9 +10,12 @@ import { NotificationError } from "../utils/notificationError.js";
 import { cloneDesignJson, toJsonInput } from "../utils/notificationDesign.js";
 import { validateDesign } from "./notificationValidation.service.js";
 import { meetsRequiredPlan } from "./notificationPlan.service.js";
+import { personaliseTemplate } from "../utils/personaliseTemplate.js";
 
 export interface ListTemplatesOptions {
   categoryId?: string;
+  /** Only these templates (the Favourites tab); still paginated and active-only. */
+  ids?: string[];
   q?: string;
   sort?: "popular" | "newest" | "name";
   page?: number;
@@ -35,7 +38,8 @@ export async function listTemplates(options: ListTemplatesOptions = {}) {
   const where = {
     isActive: true,
     ...(options.categoryId ? { categoryId: options.categoryId } : {}),
-    ...(q ? { name: { contains: q, mode: "insensitive" as const } } : {}),
+    ...(options.ids ? { id: { in: options.ids } } : {}),
+    ...(q ?{ name: { contains: q, mode: "insensitive" as const } } : {}),
   };
 
   const orderBy =
@@ -99,11 +103,12 @@ export async function useTemplate(shopkeeperId: string, templateId: string) {
         designJson: true,
         schemaVersion: true,
         requiredPlan: true,
+        sampleShopName: true,
       },
     }),
     prisma.shopkeeper.findUnique({
       where: { id: shopkeeperId },
-      select: { planType: true },
+      select: { planType: true, shop: { select: { shopName: true } } },
     }),
   ]);
 
@@ -133,7 +138,8 @@ export async function useTemplate(shopkeeperId: string, templateId: string) {
       select: { id: true },
     });
 
-    const cloned = cloneDesignJson(validated.data, {
+    const personalised = personaliseTemplate(validated.data, template.sampleShopName, shopkeeper?.shop?.shopName);
+    const cloned = cloneDesignJson(personalised, {
       id: created.id,
       name: template.name,
       source: "SHOPROOM_TEMPLATE",

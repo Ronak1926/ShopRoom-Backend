@@ -5,6 +5,7 @@
  */
 
 import z from "zod";
+import { imageDataUriSchema } from "./imageUpload.schema.js";
 import {
   NotificationDesignSchema,
   NotificationTypeSchema,
@@ -36,10 +37,7 @@ export const ValidateDesignSchema = z.object({
 
 /** POST /api/notifications/assets — upload an image asset (base64 data URI). */
 export const UploadAssetSchema = z.object({
-  image: z
-    .string()
-    .max(15_000_000) // ~11MB of base64
-    .regex(/^data:image\/(png|jpe?g|webp);base64,/, "Expected a base64 image data URI"),
+  image: imageDataUriSchema,
   width: z.number().int().positive().max(10000).optional(),
   height: z.number().int().positive().max(10000).optional(),
   sizeBytes: z.number().int().positive().max(10_000_000).optional(),
@@ -60,13 +58,30 @@ export const ListDesignsQuerySchema = z.object({
  * template's full designJson so the browser can render a live preview instead
  * of a stored thumbnail. A bigger page would mean a multi-megabyte response.
  */
-export const ListTemplatesQuerySchema = z.object({
-  categoryId: z.string().max(64).optional(),
-  q: z.string().max(120).optional(),
-  sort: z.enum(["popular", "newest", "name"]).default("popular"),
-  page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(24).default(10),
-});
+export const ListTemplatesQuerySchema = z
+  .object({
+    categoryId: z.string().max(64).optional(),
+    /**
+     * Comma-separated template ids (at most 24, one page) — how the Favourites
+     * tab fetches the handful a shopkeeper saved without walking the catalog.
+     */
+    ids: z
+      .string()
+      .max(24 * 65)
+      .transform((s) => [...new Set(s.split(",").map((id) => id.trim()).filter(Boolean))])
+      .pipe(z.array(z.string().max(64)).min(1).max(24))
+      .optional(),
+    q: z.string().max(120).optional(),
+    sort: z.enum(["popular", "newest", "name"]).default("popular"),
+    page: z.coerce.number().int().min(1).default(1),
+    /** Defaults to 10, or to the number of ids when asking for specific templates. */
+    limit: z.coerce.number().int().min(1).max(24).optional(),
+  })
+  .refine((q) => !q.ids || q.limit === undefined || q.limit >= q.ids.length, {
+    message: "limit is smaller than the number of ids",
+    path: ["limit"],
+  })
+  .transform((q) => ({ ...q, limit: q.limit ?? (q.ids ? q.ids.length : 10) }));
 
 /** GET /api/notifications/animations — optional category filter. */
 export const ListAnimationsQuerySchema = z.object({

@@ -211,7 +211,7 @@ function renderCard(name: string, category: string, design: Design): string {
 const PAGE = (cards: string, count: number) => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>ShopRoom — Notification Templates (${count})</title>
+<title>CounterCircle — Notification Templates (${count})</title>
 <style>
   * { margin:0; box-sizing:border-box; }
   body { font-family:"Manrope","Segoe UI",system-ui,sans-serif; background:#F8F9FC; color:#0F172A; padding:40px 24px; }
@@ -229,7 +229,7 @@ const PAGE = (cards: string, count: number) => `<!doctype html>
 </style></head>
 <body>
   <header>
-    <h1>ShopRoom — Notification Templates</h1>
+    <h1>CounterCircle — Notification Templates</h1>
     <p>${count} template(s), rendered by a generic recursive renderer straight from the stored composition JSON — no template-specific code. Product slots show a placeholder; the shopkeeper's uploaded image renders there at send time.</p>
   </header>
   <div class="grid">${cards}</div>

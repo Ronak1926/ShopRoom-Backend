@@ -1,5 +1,7 @@
 import { PrismaClient } from "../generated/client.js";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { logger } from "../lib/logger.js";
+import { dbPoolConfig } from "../config/env.js";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -13,7 +15,7 @@ if (!connectionString) {
   throw new Error("DATABASE_URL is not set");
 }
 
-const adapter = new PrismaPg({ connectionString });
+const adapter = new PrismaPg({ connectionString, ...dbPoolConfig() });
 
 export const prisma = global.prisma ?? new PrismaClient({ adapter });
 
@@ -28,5 +30,5 @@ export async function connectDatabase() {
 
   await prisma.$connect();
   global.__dbConnected = true;
-  console.log("Database connected successfully");
+  logger.info("Database connected");
 }

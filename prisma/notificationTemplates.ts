@@ -1,472 +1,226 @@
 /**
- * prisma/notificationTemplates.ts — CounterCircle starter templates as v2 composition
- * trees.
+ * prisma/notificationTemplates.ts — The CounterCircle starter template catalog.
  *
  * SCOPE: a template is the notification's BIG-PICTURE IMAGE — nothing else.
  * Android/iOS draw the app icon, app name, timestamp, title and body text
  * themselves, so the canvas is only the 2:1 banner (400×200) below them.
  *
  * Every template is a PRODUCT banner: a local shop showing its own products
- * with a real photo, the product name, the price and an offer. The sample
- * photos are royalty-free Unsplash images the shopkeeper swaps for their own
- * in the Studio; every word is plain editable text. The first IMAGE in each
- * design is the product photo, which is also what the phone tray shows when
- * the app is closed (see findHeroImageUrl in notificationDispatch.service).
- *
- * Layout convention: node(id, type, x, y, w, h, extra, z) — children, style
- * and the rest live in extra. Children of a container without a layout
- * direction are positioned relative to that container.
+ * with a real photo, the product name, the price and an offer. The layouts
+ * live in prisma/templates/layouts.ts; this file gives each one content for a
+ * different kind of shop (grocery, dairy, fashion, footwear, jewellery,
+ * electronics, home, bakery, café, restaurant, beauty, stationery, plants).
+ * Shop names are made up. The first IMAGE in each design is the product
+ * photo, which is also what the phone tray shows when the app is closed.
  */
 
 import {
   NotificationDesignSchema,
   type NotificationType,
 } from "../src/schemas/notification.schema.js";
+import { INK, WHITE, BRAND, type Design } from "./templates/kit.js";
+import * as L from "./templates/layouts.js";
 
-const CANVAS_W = 400;
-const CANVAS_H = 200;
-const FONT = "Poppins";
-const SERIF = "Playfair Display";
-const INK = "#17162B";
-const WHITE = "#FFFFFF";
-const BRAND = "#6D28D9";
-
-// ── Node helpers ─────────────────────────────────────────────────────────────────
-
-type Obj = Record<string, unknown>;
-interface Extra {
-  style?: Obj;
-  layout?: Obj;
-  content?: Obj;
-  image?: Obj;
-  asset?: Obj;
-  animation?: Obj;
-  interaction?: Obj;
-  children?: unknown[];
-}
-
-function node(id: string, type: string, x: number, y: number, w: number, h: number, extra: Extra = {}, z = 50, rotation = 0) {
-  return { id, type, frame: { x, y, width: w, height: h, rotation, zIndex: z }, ...extra };
-}
-
-/** Entrance animation; an optional looping emphasis starts once it has finished. */
-function enter(type: string, delayMs = 0, attention?: string) {
-  return {
-    entry: { type, delayMs, durationMs: 600, easing: "easeOut" },
-    ...(attention ? { attention: { type: attention, delayMs: delayMs + 900, durationMs: 1600, repeat: "infinite" } } : {}),
-  };
-}
-
-function photoUrl(photoId: string): string {
-  return `https://images.unsplash.com/photo-${photoId}?w=900&q=75&auto=format&fit=crop`;
-}
-
-function linear(angle: number, stops: [number, string][]) {
-  return { type: "LINEAR", angle, stops: stops.map(([offset, color]) => ({ offset, color })) };
-}
-
-interface PhotoOpts { position?: string; overlay?: Obj; radius?: number; border?: Obj; z?: number; anim?: Obj }
-function photo(id: string, photoId: string, x: number, y: number, w: number, h: number, o: PhotoOpts = {}) {
-  return node(id, "IMAGE", x, y, w, h, {
-    asset: { type: "IMAGE", url: photoUrl(photoId), attribution: { provider: "UNSPLASH" } },
-    image: { fit: "cover", position: o.position ?? "center", ...(o.overlay ? { overlay: { gradient: o.overlay, opacity: 1 } } : {}) },
-    style: { ...(o.radius != null ? { borderRadius: o.radius } : {}), ...(o.border ? { border: o.border } : {}) },
-    ...(o.anim ? { animation: o.anim } : {}),
-  }, o.z ?? 1);
-}
-
-function text(id: string, value: string, x: number, y: number, w: number, h: number, style: Obj, anim?: Obj, z = 60) {
-  return node(id, "TEXT", x, y, w, h, {
-    style: { fontFamily: FONT, textAlign: "left", lineHeight: 1.1, ...style },
-    content: { text: value },
-    ...(anim ? { animation: anim } : {}),
-  }, z);
-}
-
-/** A text pill. LABEL rather than TEXT so a border outlines the box, not the glyphs. */
-function pill(id: string, value: string, x: number, y: number, w: number, h: number, style: Obj, anim?: Obj, z = 65, rotation = 0) {
-  return node(id, "LABEL", x, y, w, h, {
-    style: { fontFamily: FONT, textAlign: "center", lineHeight: 1, ...style },
-    content: { text: value },
-    ...(anim ? { animation: anim } : {}),
-  }, z, rotation);
-}
-
-function rect(id: string, x: number, y: number, w: number, h: number, style: Obj, anim?: Obj, z = 40) {
-  return node(id, "RECTANGLE", x, y, w, h, { style, ...(anim ? { animation: anim } : {}) }, z);
-}
-
-const eyebrow = (color: string): Obj => ({ color, fontSize: 9.5, fontWeight: 600, letterSpacing: 1.4, textTransform: "uppercase", opacity: 0.92, whiteSpace: "nowrap" });
-const heading = (color: string, size = 24): Obj => ({ color, fontSize: size, fontWeight: 700, lineHeight: 1.05, letterSpacing: -0.4, verticalAlign: "top" });
-const priceStyle = (color: string, size = 26): Obj => ({ color, fontSize: size, fontWeight: 800, letterSpacing: -0.5, whiteSpace: "nowrap" });
-const mrpStyle = (color: string): Obj => ({ color, fontSize: 12, fontWeight: 500, opacity: 0.7, textDecoration: "line-through", whiteSpace: "nowrap" });
-
-/** The shop's name in a white pill, top-left (or wherever the layout needs it). */
-function shopChip(name: string, x = 14, y = 14, bg = "rgba(255,255,255,0.95)") {
-  const w = Math.ceil(name.length * 6.2) + 34;
-  return node("shop", "CONTAINER", x, y, w, 22, {
-    layout: { direction: "row", align: "center", justify: "start", gap: 6, padding: { left: 3, right: 9 } },
-    style: { backgroundColor: bg, borderRadius: 9999 },
-    animation: enter("FADE_IN"),
-    children: [
-      pill("shop-initial", name.charAt(0).toUpperCase(), 0, 0, 16, 16, { backgroundColor: BRAND, color: WHITE, fontSize: 8.5, fontWeight: 700, borderRadius: 9999 }),
-      text("shop-name", name, 0, 0, w - 34, 14, { color: INK, fontSize: 9.5, fontWeight: 600, whiteSpace: "nowrap" }),
-    ],
-  }, 90);
-}
-
-type CtaTone = "light" | "dark" | "brand";
-const CTA_TONES: Record<CtaTone, { bg: string; fg: string }> = {
-  light: { bg: WHITE, fg: INK },
-  dark: { bg: INK, fg: WHITE },
-  brand: { bg: BRAND, fg: WHITE },
+const CATEGORY_TYPES: Record<string, NotificationType> = {
+  "new-arrival": "NEW_ARRIVAL",
+  "new-stock": "NEW_STOCK",
+  restock: "RESTOCK",
+  "limited-stock": "LIMITED_STOCK",
+  sale: "SALE",
+  "flash-sale": "FLASH_SALE",
+  offer: "OFFER",
+  event: "EVENT",
+  announcement: "ANNOUNCEMENT",
+  reminder: "REMINDER",
+  custom: "CUSTOM",
 };
 
-function cta(label: string, x: number, y: number, tone: CtaTone, delayMs: number, h = 28) {
-  const t = CTA_TONES[tone];
-  const textW = Math.ceil(label.length * 6.8) + 4;
-  return node("cta", "BUTTON", x, y, textW + 30, h, {
-    layout: { direction: "row", align: "center", justify: "center" },
-    style: { backgroundColor: t.bg, borderRadius: 9999, shadow: { enabled: true, x: 0, y: 4, blur: 12, spread: -4, color: "rgba(15,23,42,0.35)" } },
-    interaction: { onClick: { type: "OPEN_PRODUCT", target: "{{product.id}}" } },
-    animation: enter("SLIDE_UP", delayMs),
-    children: [text("cta-label", label, 0, 0, textW, 14, { color: t.fg, fontSize: 11, fontWeight: 600, textAlign: "center", whiteSpace: "nowrap" })],
-  }, 95);
-}
-
-/** Small product tile: photo with a white caption (name + price) at the bottom. */
-function tile(id: string, photoId: string, x: number, y: number, w: number, h: number, name: string, price: string, delayMs: number) {
-  return [
-    photo(`${id}-photo`, photoId, x, y, w, h, { radius: 10, z: 20, anim: enter("SLIDE_UP", delayMs) }),
-    node(`${id}-caption`, "CONTAINER", x + 6, y + h - 40, w - 12, 34, {
-      layout: { direction: "column", align: "start", justify: "center", gap: 1, padding: { left: 8, right: 8 } },
-      style: { backgroundColor: "rgba(255,255,255,0.96)", borderRadius: 7 },
-      animation: enter("FADE_IN", delayMs + 200),
-      children: [
-        text(`${id}-name`, name, 0, 0, w - 28, 12, { color: INK, fontSize: 9, fontWeight: 600, overflow: "ellipsis" }),
-        text(`${id}-price`, price, 0, 0, w - 28, 15, { color: INK, fontSize: 12, fontWeight: 800, whiteSpace: "nowrap" }),
-      ],
-    }, 30),
-  ];
-}
-
-// ── The sixteen product banners ──────────────────────────────────────────────────
-
-const PHOTOS = {
-  saree: "1610030469983-98e550d6193c",
-  headphones: "1505740420928-5e560c06d30e",
-  smartwatch: "1546868871-7041f2a55e12",
-  loafers: "1560343090-f0409e92791a",
-  tee: "1521572163474-6864f9cf17ab",
-  sweatshirt: "1620799140408-edc6dcb6d633",
-  shirts: "1602810318383-e386cc2a3ccf",
-  backpack: "1553062407-98eeb64c6a62",
-  sneaker: "1491553895911-0055eca6402d",
-  vegetables: "1542838132-92c53300491e",
-  anarkali: "1583391733956-3750e0ff4e8b",
-  watches: "1523275335684-37898b6baf30",
-  makeup: "1596462502278-27bfdc403348",
-  watermelon: "1587049352846-4a222e784d38",
-  cake: "1578985545062-69928b1d9587",
-  apples: "1567306226416-28f0efdc88ce",
-  pizza: "1513104890138-7c749659a591",
-};
-
-/** Left-to-right darkening so white copy reads on any photo. */
-const leftScrim = (rgb: string, strong = 0.88) =>
-  linear(90, [[0, `rgba(${rgb},${strong})`], [0.45, `rgba(${rgb},${(strong * 0.6).toFixed(2)})`], [0.78, `rgba(${rgb},0)`]]);
-/** Fades a side photo into the flat background colour next to it. */
-const fadeFromLeft = (rgb: string) => linear(90, [[0, `rgb(${rgb})`], [0.32, `rgba(${rgb},0)`]]);
-
-interface Template {
+interface Entry {
   slug: string;
   name: string;
-  category: NotificationType;
-  categorySlug: string;
-  background: string;
-  elements: () => unknown[];
+  categorySlug: keyof typeof CATEGORY_TYPES;
+  design: () => Design;
 }
 
-const TEMPLATE_LIST: Template[] = [
-  {
-    slug: "product-hero", name: "Hero Product", category: "NEW_ARRIVAL", categorySlug: "new-arrival", background: "#3A0A12",
-    elements: () => [
-      photo("product-photo", PHOTOS.saree, 0, 0, 400, 200, { position: "top", overlay: leftScrim("20,6,10") }),
-      shopChip("Riya Boutique"),
-      text("label", "New in store", 20, 56, 200, 14, eyebrow(WHITE), enter("SLIDE_UP", 100)),
-      text("name", "Banarasi Silk Saree", 20, 72, 200, 52, heading(WHITE), enter("SLIDE_UP", 200)),
-      text("price", "₹4,299", 20, 126, 88, 30, priceStyle(WHITE), enter("SLIDE_UP", 300)),
-      text("mrp", "₹6,499", 108, 136, 60, 16, mrpStyle(WHITE), enter("SLIDE_UP", 300)),
-      cta("View in shop", 20, 162, "light", 450),
-    ],
-  },
-  {
-    slug: "product-price-sticker", name: "Price Sticker", category: "OFFER", categorySlug: "offer", background: "#F7C518",
-    elements: () => [
-      photo("product-photo", PHOTOS.headphones, 150, 0, 250, 200, { overlay: fadeFromLeft("247,197,24") }),
-      shopChip("SoundHub"),
-      text("label", "Wireless · 30h battery", 20, 58, 180, 14, eyebrow(INK), enter("SLIDE_UP", 100)),
-      text("name", "Studio Headphones", 20, 74, 170, 52, heading(INK), enter("SLIDE_UP", 200)),
-      cta("Buy now", 20, 134, "dark", 400),
-      node("sticker", "CONTAINER", 180, 104, 82, 82, {
-        layout: { direction: "column", align: "center", justify: "center", gap: 0 },
-        style: { backgroundColor: INK, borderRadius: 9999, shadow: { enabled: true, x: 0, y: 6, blur: 16, spread: -4, color: "rgba(0,0,0,0.35)" } },
-        animation: enter("POP", 500, "PULSE"),
-        children: [
-          text("sticker-label", "only", 0, 0, 70, 12, { color: WHITE, fontSize: 9.5, fontWeight: 500, opacity: 0.8, textAlign: "center" }),
-          text("price", "₹1,299", 0, 0, 76, 24, { ...priceStyle(WHITE, 19), textAlign: "center" }),
-        ],
-      }, 80),
-    ],
-  },
-  {
-    slug: "product-split-card", name: "Split Card", category: "OFFER", categorySlug: "offer", background: WHITE,
-    elements: () => [
-      photo("product-photo", PHOTOS.smartwatch, 0, 0, 184, 200, { anim: enter("FADE_IN") }),
-      shopChip("Gadget Point", 283, 14, "#F3F0FB"),
-      pill("discount", "25% OFF", 202, 36, 58, 18, { backgroundColor: "#16A34A", color: WHITE, fontSize: 9.5, fontWeight: 700, borderRadius: 4 }, enter("POP", 200)),
-      text("name", "Smart Watch S2", 202, 58, 186, 50, heading(INK, 22), enter("SLIDE_LEFT", 250)),
-      text("spec", "AMOLED · 7-day battery", 202, 110, 186, 14, { color: "#6B6A80", fontSize: 10.5 }, enter("SLIDE_LEFT", 320)),
-      text("price", "₹2,999", 202, 126, 88, 30, priceStyle(INK), enter("SLIDE_LEFT", 400)),
-      text("mrp", "₹3,999", 290, 136, 60, 16, mrpStyle(INK), enter("SLIDE_LEFT", 400)),
-      cta("Order now", 202, 162, "brand", 550),
-    ],
-  },
-  {
-    slug: "product-discount-burst", name: "Discount Burst", category: "SALE", categorySlug: "sale", background: "#F3E5DD",
-    elements: () => [
-      photo("product-photo", PHOTOS.loafers, 0, 0, 400, 200),
-      shopChip("Step Up Shoes"),
-      node("burst", "CONTAINER", 288, 12, 98, 98, {
-        layout: { direction: "column", align: "center", justify: "center", gap: 0 },
-        style: { backgroundColor: "#E11D48", clipShape: "burst" },
-        animation: enter("POP", 400, "PULSE"),
-        children: [
-          text("discount", "40%", 0, 0, 70, 28, { color: WHITE, fontSize: 24, fontWeight: 800, textAlign: "center" }),
-          text("discount-label", "OFF", 0, 0, 50, 13, { color: WHITE, fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textAlign: "center" }),
-        ],
-      }, 80),
-      node("price-card", "CONTAINER", 16, 112, 172, 74, {
-        style: { backgroundColor: "rgba(255,255,255,0.96)", borderRadius: 10, shadow: { enabled: true, x: 0, y: 6, blur: 16, spread: -6, color: "rgba(15,23,42,0.25)" } },
-        animation: enter("SLIDE_UP", 300),
-        children: [
-          text("name", "Suede Loafers", 12, 10, 150, 24, heading(INK, 18)),
-          text("price", "₹1,799", 12, 36, 86, 30, priceStyle(INK, 24)),
-          text("mrp", "₹2,999", 100, 45, 62, 16, mrpStyle(INK)),
-        ],
-      }, 70),
-    ],
-  },
-  {
-    slug: "product-pair", name: "Two Products", category: "NEW_STOCK", categorySlug: "new-stock", background: "#F4EFE6",
-    elements: () => [
-      text("label", "Cotton Co.", 20, 50, 130, 14, eyebrow("#2B2118"), enter("SLIDE_UP")),
-      text("name", "Everyday basics", 20, 66, 136, 58, { ...heading("#2B2118", 24), fontFamily: SERIF }, enter("SLIDE_UP", 100)),
-      cta("See sizes", 20, 132, "dark", 300),
-      ...tile("item-1", PHOTOS.tee, 166, 14, 104, 172, "Cotton Tee", "₹399", 150),
-      ...tile("item-2", PHOTOS.sweatshirt, 282, 14, 104, 172, "Sweatshirt", "₹899", 280),
-    ],
-  },
-  {
-    slug: "product-grid", name: "Three Products", category: "NEW_ARRIVAL", categorySlug: "new-arrival", background: "#0F172A",
-    elements: () => [
-      text("name", "New this week", 16, 14, 220, 26, heading(WHITE, 18), enter("FADE_IN")),
-      text("link", "See all →", 296, 18, 88, 18, { color: "#A5B4FC", fontSize: 11, fontWeight: 600, textAlign: "right" }, enter("FADE_IN", 100)),
-      ...tile("item-1", PHOTOS.shirts, 16, 50, 116, 136, "Linen Shirt", "₹799", 100),
-      ...tile("item-2", PHOTOS.backpack, 142, 50, 116, 136, "Daypack", "₹1,199", 200),
-      ...tile("item-3", PHOTOS.sneaker, 268, 50, 116, 136, "Runner", "₹1,899", 300),
-    ],
-  },
-  {
-    slug: "product-rate-card", name: "Daily Rate Card", category: "NEW_STOCK", categorySlug: "new-stock", background: "#0F3D2E",
-    elements: () => {
-      const rows: [string, string, string][] = [["Tomato", "₹40", "/kg"], ["Onion", "₹35", "/kg"], ["Potato", "₹30", "/kg"], ["Spinach", "₹20", "/bunch"]];
-      return [
-        photo("product-photo", PHOTOS.vegetables, 0, 0, 160, 200, { anim: enter("FADE_IN") }),
-        pill("tag", "Fresh stock", 10, 172, 72, 18, { backgroundColor: "#BEF264", color: "#0F3D2E", fontSize: 9, fontWeight: 700, borderRadius: 9999 }, enter("POP", 600)),
-        text("label", "Today's rates · 7 AM", 178, 22, 206, 14, eyebrow(WHITE), enter("SLIDE_UP")),
-        text("name", "Sharma Sabzi", 178, 38, 206, 28, heading(WHITE, 20), enter("SLIDE_UP", 60)),
-        ...rows.map(([item, price, unit], i) =>
-          node(`row-${i + 1}`, "CONTAINER", 178, 74 + i * 27, 206, 22, {
-            layout: { direction: "row", align: "center", justify: "start", gap: 6 },
-            animation: enter("SLIDE_LEFT", 150 + i * 100),
-            children: [
-              text(`row-${i + 1}-item`, item, 0, 0, 68, 16, { color: WHITE, fontSize: 12.5, fontWeight: 500, whiteSpace: "nowrap" }),
-              rect(`row-${i + 1}-dots`, 0, 0, 44, 0, { border: { width: 1, color: "rgba(255,255,255,0.35)", style: "dotted" } }),
-              text(`row-${i + 1}-price`, price, 0, 0, 38, 16, { color: "#BEF264", fontSize: 13, fontWeight: 700, textAlign: "right", whiteSpace: "nowrap" }),
-              text(`row-${i + 1}-unit`, unit, 0, 0, 38, 14, { color: WHITE, fontSize: 9, opacity: 0.7, whiteSpace: "nowrap" }),
-            ],
-          }, 60),
-        ),
-      ];
-    },
-  },
-  {
-    slug: "product-combo", name: "Combo Deal", category: "OFFER", categorySlug: "offer", background: "#4C1D95",
-    elements: () => [
-      rect("backdrop", 0, 0, 400, 200, { backgroundGradient: linear(135, [[0, "#7C3AED"], [1, "#3B0764"]]) }, undefined, 0),
-      text("label", "Urban Store · Combo deal", 20, 18, 250, 14, eyebrow("#E9D5FF"), enter("FADE_IN")),
-      photo("product-photo", PHOTOS.sneaker, 20, 50, 84, 84, { radius: 9999, border: { width: 3, color: WHITE, style: "solid" }, z: 30, anim: enter("POP", 100) }),
-      text("plus", "+", 108, 74, 24, 34, { color: WHITE, fontSize: 30, fontWeight: 300, textAlign: "center" }, enter("FADE_IN", 300)),
-      photo("product-photo-2", PHOTOS.backpack, 136, 50, 84, 84, { radius: 9999, border: { width: 3, color: WHITE, style: "solid" }, z: 30, anim: enter("POP", 400) }),
-      text("name", "Runner + Daypack", 20, 152, 200, 16, { color: WHITE, fontSize: 11, opacity: 0.85 }, enter("FADE_IN", 500)),
-      text("price-label", "Both for", 250, 40, 134, 14, { ...eyebrow(WHITE), textAlign: "right" }, enter("FADE_IN", 500)),
-      text("price", "₹2,499", 230, 56, 154, 44, { ...priceStyle(WHITE, 36), textAlign: "right" }, enter("POP", 600)),
-      pill("saving", "Save ₹600", 310, 104, 74, 20, { backgroundColor: "#FACC15", color: "#3B0764", fontSize: 10, fontWeight: 700, borderRadius: 9999 }, enter("SLIDE_UP", 750)),
-      cta("Grab the combo", 254, 138, "light", 900),
-    ],
-  },
-  {
-    slug: "product-new-arrival", name: "New Arrival", category: "NEW_ARRIVAL", categorySlug: "new-arrival", background: "#1C2A24",
-    elements: () => [
-      photo("product-photo", PHOTOS.anarkali, 0, 0, 400, 200, { position: "top", overlay: leftScrim("18,28,24") }),
-      shopChip("Riya Boutique"),
-      pill("ribbon", "NEW", 322, 14, 120, 20, { backgroundColor: "#F43F5E", color: WHITE, fontSize: 10, fontWeight: 800, letterSpacing: 3 }, enter("FADE_IN", 500), 85, 35),
-      text("name", "Chikankari Anarkali", 20, 54, 200, 52, heading(WHITE), enter("SLIDE_UP", 100)),
-      ...["#E8EFE9", "#F4C2C2", "#C7D2FE"].map((color, i) =>
-        rect(`colour-${i + 1}`, 20 + i * 18, 112, 13, 13, { backgroundColor: color, borderRadius: 9999, border: { width: 2, color: WHITE, style: "solid" } }, enter("POP", 200 + i * 60), 60),
-      ),
-      ...["S", "M", "L", "XL"].map((size, i) =>
-        pill(`size-${i + 1}`, size, 20 + i * 26, 132, 22, 16, { color: WHITE, fontSize: 9, fontWeight: 600, borderRadius: 3, border: { width: 1, color: "rgba(255,255,255,0.7)", style: "solid" } }, enter("SLIDE_UP", 300)),
-      ),
-      text("price", "₹2,450", 20, 154, 120, 32, priceStyle(WHITE), enter("SLIDE_UP", 400)),
-    ],
-  },
-  {
-    slug: "product-low-stock", name: "Low Stock", category: "LIMITED_STOCK", categorySlug: "limited-stock", background: "#F1F1EF",
-    elements: () => [
-      photo("product-photo", PHOTOS.watches, 192, 0, 208, 200, { overlay: fadeFromLeft("241,241,239"), anim: enter("FADE_IN") }),
-      shopChip("Time House"),
-      rect("alert-dot", 20, 52, 8, 8, { backgroundColor: "#DC2626", borderRadius: 9999 }, enter("FADE_IN", 0, "PULSE"), 60),
-      text("label", "Almost gone", 34, 49, 140, 14, { ...eyebrow("#DC2626"), fontWeight: 700, opacity: 1 }, enter("FADE_IN")),
-      text("name", "Classic White Watch", 20, 66, 176, 46, heading(INK, 21), enter("SLIDE_UP", 100)),
-      rect("stock-track", 20, 116, 170, 7, { backgroundColor: "#E2E0E8", borderRadius: 9999 }, enter("FADE_IN", 200)),
-      rect("stock-fill", 20, 116, 34, 7, { backgroundGradient: linear(90, [[0, "#F97316"], [1, "#DC2626"]]), borderRadius: 9999 }, enter("SLIDE_RIGHT", 400), 41),
-      text("stock", "Only 4 left in store", 20, 127, 170, 14, { color: "#DC2626", fontSize: 10.5, fontWeight: 600 }, enter("FADE_IN", 500)),
-      text("price", "₹3,499", 20, 148, 92, 30, priceStyle(INK, 24), enter("SLIDE_UP", 300)),
-      cta("Reserve now", 112, 149, "dark", 600),
-    ],
-  },
-  {
-    slug: "product-back-in-stock", name: "Back in Stock", category: "RESTOCK", categorySlug: "restock", background: "#FAE8D6",
-    elements: () => [
-      photo("product-photo", PHOTOS.makeup, 0, 0, 400, 200, {
-        overlay: linear(90, [[0, "rgba(250,232,214,0.96)"], [0.45, "rgba(250,232,214,0.72)"], [0.72, "rgba(250,232,214,0)"]]),
-      }),
-      shopChip("Glow Beauty"),
-      text("label", "Restocked today", 20, 56, 190, 14, eyebrow("#3B1D1D"), enter("SLIDE_UP", 100)),
-      text("name", "Rose Glow Makeup Kit", 20, 72, 190, 52, heading("#3B1D1D", 22), enter("SLIDE_UP", 200)),
-      text("price", "₹1,150", 20, 126, 120, 30, priceStyle("#3B1D1D", 24), enter("SLIDE_UP", 300)),
-      cta("Order before it's gone", 20, 160, "dark", 450),
-      node("stamp", "CONTAINER", 236, 126, 152, 36, {
-        layout: { direction: "row", align: "center", justify: "center" },
-        style: { backgroundColor: "rgba(255,255,255,0.78)", border: { width: 3, color: "#BE123C", style: "solid" }, borderRadius: 6 },
-        animation: enter("ZOOM_OUT_IN", 500),
-        children: [text("stamp-text", "BACK IN STOCK", 0, 0, 144, 20, { color: "#BE123C", fontFamily: "Montserrat", fontSize: 14, fontWeight: 800, letterSpacing: 1, textAlign: "center", whiteSpace: "nowrap" })],
-      }, 80, -12),
-    ],
-  },
-  {
-    slug: "product-deal-of-the-day", name: "Deal of the Day", category: "FLASH_SALE", categorySlug: "flash-sale", background: "#FBFBF8",
-    elements: () => [
-      photo("product-photo", PHOTOS.watermelon, 0, 0, 190, 200, { position: "left", anim: enter("FADE_IN") }),
-      text("label", "Deal of the day", 206, 34, 180, 14, eyebrow("#E11D48"), enter("SLIDE_UP")),
-      text("name", "Sweet Watermelon", 206, 50, 180, 52, heading(INK, 22), enter("SLIDE_UP", 100)),
-      text("price", "₹25/kg", 206, 104, 96, 30, priceStyle(INK, 24), enter("SLIDE_UP", 200)),
-      text("mrp", "₹40", 302, 113, 50, 16, mrpStyle(INK), enter("SLIDE_UP", 200)),
-      node("ends", "LABEL", 206, 144, 172, 28, {
-        style: { fontFamily: FONT, backgroundColor: INK, color: WHITE, fontSize: 10.5, fontWeight: 600, borderRadius: 8, textAlign: "center" },
-        content: { text: "Ends tonight at 11:59 PM", icon: "AccessTime", iconPosition: "left", iconSize: 14 },
-        animation: enter("SLIDE_UP", 300, "PULSE"),
-      }, 70),
-    ],
-  },
-  {
-    slug: "product-bestseller", name: "Bestseller", category: "CUSTOM", categorySlug: "custom", background: "#1C0E06",
-    elements: () => [
-      photo("product-photo", PHOTOS.cake, 0, 0, 400, 200, { overlay: leftScrim("28,14,6", 0.9) }),
-      shopChip("Sweet Tooth Bakery"),
-      pill("badge", "#1 Bestseller", 20, 48, 86, 18, { backgroundGradient: linear(90, [[0, "#FBBF24"], [0.5, "#FDE68A"], [1, "#FBBF24"]]), color: "#3B2304", fontSize: 9.5, fontWeight: 700, borderRadius: 9999 }, enter("POP", 100, "GLOW")),
-      text("name", "Chocolate Truffle Cake", 20, 72, 190, 50, heading(WHITE, 22), enter("SLIDE_UP", 150)),
-      text("stars", "★★★★★", 20, 124, 62, 14, { color: "#FBBF24", fontSize: 11, letterSpacing: 1 }, enter("FADE_IN", 250)),
-      text("rating", "4.9 · 500+ sold", 84, 124, 120, 14, { color: WHITE, fontSize: 10.5, opacity: 0.85 }, enter("FADE_IN", 250)),
-      text("price", "₹549", 20, 144, 66, 32, priceStyle(WHITE, 25), enter("SLIDE_UP", 350)),
-      text("unit", "/ 500g", 84, 156, 50, 14, { color: WHITE, fontSize: 11, opacity: 0.75 }, enter("SLIDE_UP", 350)),
-      cta("Pre-order", 140, 147, "light", 500),
-    ],
-  },
-  {
-    slug: "product-collection", name: "Collection Strip", category: "NEW_ARRIVAL", categorySlug: "new-arrival", background: "#111111",
-    elements: () => [
-      ...tile("item-1", PHOTOS.saree, 150, 14, 72, 172, "Saree", "₹4,299", 100),
-      ...tile("item-2", PHOTOS.anarkali, 228, 14, 72, 172, "Anarkali", "₹2,450", 200),
-      ...tile("item-3", PHOTOS.shirts, 306, 14, 72, 172, "Shirt", "₹799", 300),
-      ...tile("item-4", PHOTOS.sweatshirt, 384, 14, 72, 172, "Sweatshirt", "₹899", 400),
-      text("label", "Riya Boutique", 20, 44, 120, 14, eyebrow(WHITE), enter("FADE_IN")),
-      text("name", "Festive Collection", 20, 60, 124, 56, { ...heading(WHITE, 24), fontFamily: SERIF }, enter("SLIDE_UP", 100)),
-      text("info", "12 new pieces · from ₹399", 20, 120, 128, 14, { color: WHITE, fontSize: 10, opacity: 0.85, whiteSpace: "nowrap" }, enter("FADE_IN", 200)),
-      cta("Browse all", 20, 146, "light", 350),
-    ],
-  },
-  {
-    slug: "product-quantity-prices", name: "Quantity Prices", category: "OFFER", categorySlug: "offer", background: "#3C0808",
-    elements: () => {
-      const tiers: [string, string][] = [["1 kg", "₹180"], ["3 kg", "₹500"], ["5 kg", "₹800"]];
-      return [
-        photo("product-photo", PHOTOS.apples, 0, 0, 400, 200, { overlay: linear(180, [[0, "rgba(60,8,8,0.35)"], [0.8, "rgba(40,6,6,0.92)"]]) }),
-        shopChip("Fresh Fruits Corner"),
-        text("name", "Kashmiri Apples", 20, 48, 300, 30, heading(WHITE, 24), enter("SLIDE_UP", 100)),
-        text("label", "Buy more, pay less", 20, 80, 200, 14, eyebrow(WHITE), enter("SLIDE_UP", 200)),
-        ...tiers.map(([qty, price], i) => {
-          const best = i === 1;
-          return node(`tier-${i + 1}`, "CONTAINER", 20 + i * 123, 120, 113, 60, {
-            style: best
-              ? { backgroundColor: WHITE, borderRadius: 10 }
-              : { backgroundColor: "rgba(255,255,255,0.14)", border: { width: 1, color: "rgba(255,255,255,0.3)", style: "solid" }, borderRadius: 10, backdropBlur: 6 },
-            animation: enter(best ? "POP" : "SLIDE_UP", 300 + i * 150),
-            children: [
-              text(`tier-${i + 1}-qty`, qty, 12, 10, 90, 14, { color: best ? "#7F1D1D" : WHITE, fontSize: 10, opacity: 0.85 }),
-              text(`tier-${i + 1}-price`, price, 12, 26, 90, 26, priceStyle(best ? "#7F1D1D" : WHITE, 20)),
-            ],
-          }, 60);
-        }),
-        pill("best-value", "Best value", 186, 112, 62, 16, { backgroundColor: "#FACC15", color: "#3B0764", fontSize: 8, fontWeight: 700, borderRadius: 9999 }, enter("POP", 600), 70),
-      ];
-    },
-  },
-  {
-    slug: "product-food-sizes", name: "Food with Sizes", category: "CUSTOM", categorySlug: "custom", background: "#1C1007",
-    elements: () => [
-      photo("product-photo", PHOTOS.pizza, 168, 0, 232, 200, { overlay: fadeFromLeft("28,16,7"), anim: enter("FADE_IN") }),
-      shopChip("Slice Point"),
-      text("label", "Hot & fresh", 20, 48, 190, 14, eyebrow("#FDBA74"), enter("SLIDE_UP")),
-      text("name", "Farmhouse Pizza", 20, 64, 190, 50, heading(WHITE, 22), enter("SLIDE_UP", 100)),
-      pill("option-1", "Medium  ₹249", 20, 116, 86, 22, { color: WHITE, fontSize: 10, fontWeight: 600, borderRadius: 6, border: { width: 1, color: "rgba(253,186,116,0.6)", style: "solid" } }, enter("SLIDE_UP", 200)),
-      pill("option-2", "Large  ₹399", 112, 116, 80, 22, { color: WHITE, fontSize: 10, fontWeight: 600, borderRadius: 6, border: { width: 1, color: "rgba(253,186,116,0.6)", style: "solid" } }, enter("SLIDE_UP", 260)),
-      text("info", "Ready in 20 min · free delivery nearby", 20, 144, 200, 14, { color: WHITE, fontSize: 10, opacity: 0.85, whiteSpace: "nowrap" }, enter("FADE_IN", 300)),
-      cta("Order now", 20, 164, "light", 450, 26),
-    ],
-  },
+const t = (slug: string, name: string, categorySlug: Entry["categorySlug"], design: () => Design): Entry => ({ slug, name, categorySlug, design });
+
+const CATALOG: Entry[] = [
+  // ── Hero product ───────────────────────────────────────────────────────────
+  t("product-hero", "Hero Product", "new-arrival", () => L.hero({ shop: "Riya Boutique", label: "New in store", name: "Banarasi Silk Saree", price: "₹4,299", mrp: "₹6,499", cta: "View in shop", photo: "saree", tint: "#3A0A12" })),
+  t("hero-wrap-dress", "Hero · Dress", "new-arrival", () => L.hero({ shop: "Lavender Lane", label: "Festive drop", name: "Floral Wrap Dress", price: "₹1,650", mrp: "₹2,199", cta: "Try it in store", photo: "redDress2", tint: "#3B0A0A", position: "center" })),
+  t("hero-biryani", "Hero · Biryani", "offer", () => L.hero({ shop: "Masala House", label: "Chef's special", name: "Hyderabadi Dum Biryani", price: "₹249", cta: "Order now", photo: "biryani", tint: "#2A1206", position: "center" })),
+  t("hero-sofa", "Hero · Sofa", "new-stock", () => L.hero({ shop: "Home Nest", label: "New in showroom", name: "Velvet 3-Seater Sofa", price: "₹24,999", mrp: "₹31,999", cta: "Book a visit", photo: "sofa", tint: "#0D2B25", position: "center" })),
+
+  // ── Price sticker ──────────────────────────────────────────────────────────
+  t("product-price-sticker", "Price Sticker", "offer", () => L.sticker({ shop: "SoundHub", label: "Wireless · 30h battery", name: "Studio Headphones", stickerLabel: "only", price: "₹1,299", cta: "Buy now", photo: "headphones", bg: "#F7C518" })),
+  t("sticker-ice-cream", "Sticker · Ice Cream", "offer", () => L.sticker({ shop: "Cream Corner", label: "Summer special", name: "Vanilla Swirl Cone", stickerLabel: "just", price: "₹60", cta: "Grab one", photo: "iceCream", bg: "#F9B54C" })),
+  t("sticker-headphones", "Sticker · Headphones", "offer", () => L.sticker({ shop: "Tech Bazaar", label: "Up to 40h playtime", name: "Over-Ear Headphones", stickerLabel: "now", price: "₹2,499", cta: "Buy now", photo: "headphones3", bg: "#ECECEC" })),
+  t("sticker-cupcakes", "Sticker · Cupcakes", "offer", () => L.sticker({ shop: "Bake Studio", label: "Fresh every morning", name: "Strawberry Cupcakes", stickerLabel: "box of 6", price: "₹299", cta: "Pre-order", photo: "cupcakes", bg: "#F6D9DE" })),
+
+  // ── Split card ─────────────────────────────────────────────────────────────
+  t("product-split-card", "Split Card", "offer", () => L.split({ shop: "Gadget Point", discount: "25% OFF", name: "Smart Watch S2", spec: "AMOLED · 7-day battery", price: "₹2,999", mrp: "₹3,999", cta: "Order now", photo: "smartwatch", accent: BRAND })),
+  t("split-laptop", "Split · Laptop", "offer", () => L.split({ shop: "Tech Bazaar", discount: "15% OFF", name: "Slim Laptop 14 inch", spec: "16 GB RAM · 512 GB SSD", price: "₹54,990", mrp: "₹64,990", cta: "Book a demo", photo: "laptop", accent: "#2563EB" })),
+  t("split-sunglasses", "Split · Sunglasses", "sale", () => L.split({ shop: "Specs & More", discount: "30% OFF", name: "Round Sunglasses", spec: "UV400 · metal frame", price: "₹899", mrp: "₹1,299", cta: "Try them on", photo: "sunglasses", accent: "#0F766E" })),
+  t("split-blender", "Split · Blender", "offer", () => L.split({ shop: "Home Nest", discount: "20% OFF", name: "Power Blender", spec: "1.5 L glass jar · 3 speeds", price: "₹2,199", mrp: "₹2,749", cta: "Order now", photo: "blender", accent: "#EA580C" })),
+
+  // ── Discount burst ─────────────────────────────────────────────────────────
+  t("product-discount-burst", "Discount Burst", "sale", () => L.burst({ shop: "Step Up Shoes", discount: "40%", name: "Suede Loafers", price: "₹1,799", mrp: "₹2,999", photo: "loafers", bg: "#F3E5DD", burst: "#E11D48" })),
+  t("burst-heels", "Burst · Heels", "sale", () => L.burst({ shop: "Stiletto Lane", discount: "40%", name: "Printed Heels", price: "₹1,499", mrp: "₹2,499", photo: "heels", bg: "#8ED1E8", burst: "#DB2777" })),
+  t("burst-handbag", "Burst · Handbag", "sale", () => L.burst({ shop: "Bag Story", discount: "30%", name: "Leather Handbag", price: "₹2,299", mrp: "₹3,299", photo: "redBag", bg: "#5A1A14", burst: "#F59E0B" })),
+  t("burst-chair", "Burst · Chair", "sale", () => L.burst({ shop: "Home Nest", discount: "35%", name: "Accent Chair", price: "₹6,499", mrp: "₹9,999", photo: "chair", bg: "#E5E7E4", burst: "#0F766E" })),
+
+  // ── Two products ───────────────────────────────────────────────────────────
+  t("product-pair", "Two Products", "new-stock", () => L.pair({ label: "Cotton Co.", title: "Everyday basics", cta: "See sizes", items: [{ photo: "tee", name: "Cotton Tee", price: "₹399" }, { photo: "sweatshirt", name: "Sweatshirt", price: "₹899" }], bg: "#F4EFE6", ink: "#2B2118" })),
+  t("pair-bags", "Two · Bags", "new-stock", () => L.pair({ label: "Bag Story", title: "Carry-all bags", cta: "Visit store", items: [{ photo: "orangeBag", name: "Wicker Tote", price: "₹1,299" }, { photo: "tealBag", name: "Satchel", price: "₹1,899" }], bg: "#FBF3EA", ink: "#3B2414" })),
+  t("pair-plants", "Two · Plants", "new-stock", () => L.pair({ label: "Green Pot Nursery", title: "Desk plants", cta: "Pick yours", items: [{ photo: "succulent", name: "Succulent", price: "₹199" }, { photo: "cactus", name: "Cactus", price: "₹149" }], bg: "#EEF5EC", ink: "#1F3B2C" })),
+  t("pair-bread", "Two · Bread", "new-stock", () => L.pair({ label: "Bake Studio", title: "Fresh from the oven", cta: "Reserve a loaf", items: [{ photo: "breadLoaves", name: "Multigrain", price: "₹90" }, { photo: "slicedBread", name: "Sourdough", price: "₹120" }], bg: "#F7EFE3", ink: "#3B2A1A" })),
+
+  // ── Three-product grid ─────────────────────────────────────────────────────
+  t("product-grid", "Three Products", "new-arrival", () => L.grid({ title: "New this week", link: "See all →", items: [{ photo: "shirts", name: "Linen Shirt", price: "₹799" }, { photo: "backpack", name: "Daypack", price: "₹1,199" }, { photo: "sneaker", name: "Runner", price: "₹1,899" }], bg: "#0F172A", linkColor: "#A5B4FC" })),
+  t("grid-bakery", "Grid · Bakery", "new-stock", () => L.grid({ title: "Today's bakes", link: "Order →", items: [{ photo: "cookies", name: "Choco Cookies", price: "₹149" }, { photo: "donuts", name: "Glazed Donuts", price: "₹60" }, { photo: "cakeSlice", name: "Berry Cake", price: "₹120" }], bg: "#2A1810", linkColor: "#FBBF24" })),
+  t("grid-jewellery", "Grid · Jewellery", "new-arrival", () => L.grid({ title: "Bridal edit", link: "Visit store →", items: [{ photo: "necklace", name: "Gold Pendant", price: "₹18,500" }, { photo: "earrings", name: "Drop Earrings", price: "₹6,200" }, { photo: "ring", name: "Solitaire Ring", price: "₹24,000" }], bg: "#1A1407", linkColor: "#F5D27A" })),
+  t("grid-gadgets", "Grid · Gadgets", "new-arrival", () => L.grid({ title: "Top gadgets", link: "See all →", items: [{ photo: "headphones2", name: "Headphones", price: "₹1,799" }, { photo: "speaker", name: "Bookshelf Speaker", price: "₹3,499" }, { photo: "mouse", name: "Wireless Mouse", price: "₹699" }], bg: "#0B1B2B", linkColor: "#7DD3FC" })),
+
+  // ── Daily rate card ────────────────────────────────────────────────────────
+  t("product-rate-card", "Daily Rate Card", "new-stock", () => L.rateCard({ label: "Today's rates · 7 AM", name: "Sharma Sabzi", rows: [["Tomato", "₹40", "/kg"], ["Onion", "₹35", "/kg"], ["Potato", "₹30", "/kg"], ["Spinach", "₹20", "/bunch"]], tag: "Fresh stock", photo: "vegetables", bg: "#0F3D2E", accent: "#BEF264" })),
+  t("rate-fruits", "Rates · Fruits", "new-stock", () => L.rateCard({ label: "Today's rates · 8 AM", name: "Fruit Mandi", rows: [["Banana", "₹50", "/dozen"], ["Apple", "₹160", "/kg"], ["Papaya", "₹45", "/kg"], ["Grapes", "₹90", "/kg"]], tag: "Just arrived", photo: "fruitBowl", bg: "#3B0D1F", accent: "#FCD34D" })),
+  t("rate-dairy", "Rates · Dairy", "new-stock", () => L.rateCard({ label: "Today's prices", name: "Daily Dairy", rows: [["Milk", "₹62", "/litre"], ["Curd", "₹30", "/500g"], ["Paneer", "₹90", "/200g"], ["Ghee", "₹320", "/500ml"]], tag: "Fresh today", photo: "milkPour", bg: "#0B2545", accent: "#7DD3FC" })),
+  t("rate-kirana", "Rates · Kirana", "new-stock", () => L.rateCard({ label: "This week's rates", name: "Patel Kirana", rows: [["Basmati", "₹110", "/kg"], ["Toor dal", "₹140", "/kg"], ["Sugar", "₹44", "/kg"], ["Atta", "₹38", "/kg"]], tag: "Home delivery", photo: "rice", bg: "#3A2A05", accent: "#FDE68A" })),
+
+  // ── Combo deal ─────────────────────────────────────────────────────────────
+  t("product-combo", "Combo Deal", "offer", () => L.combo({ label: "Urban Store · Combo deal", photos: ["sneaker", "backpack"], comboName: "Runner + Daypack", priceLabel: "Both for", price: "₹2,499", saving: "Save ₹600", cta: "Grab the combo", from: "#7C3AED", to: "#3B0764", soft: "#E9D5FF" })),
+  t("combo-burger-meal", "Combo · Burger Meal", "offer", () => L.combo({ label: "Grill Street · Meal deal", photos: ["burger", "mojito"], comboName: "Burger + Mojito", priceLabel: "Both for", price: "₹249", saving: "Save ₹80", cta: "Order the meal", from: "#F97316", to: "#9A3412", soft: "#FFEDD5" })),
+  t("combo-chai", "Combo · Chai", "offer", () => L.combo({ label: "Chai Adda · Evening combo", photos: ["chai", "cookies"], comboName: "Chai + Cookies", priceLabel: "Both for", price: "₹79", saving: "Save ₹21", cta: "Order now", from: "#B45309", to: "#451A03", soft: "#FDE68A" })),
+  t("combo-skincare", "Combo · Skincare", "offer", () => L.combo({ label: "Glow Beauty · Combo deal", photos: ["serum", "makeup"], comboName: "Serum + Makeup Kit", priceLabel: "Both for", price: "₹1,499", saving: "Save ₹400", cta: "Get the combo", from: "#DB2777", to: "#831843", soft: "#FCE7F3" })),
+
+  // ── New arrival ────────────────────────────────────────────────────────────
+  t("product-new-arrival", "New Arrival", "new-arrival", () => L.newArrival({ shop: "Riya Boutique", ribbon: "NEW", name: "Chikankari Anarkali", colors: ["#E8EFE9", "#F4C2C2", "#C7D2FE"], sizes: ["S", "M", "L", "XL"], price: "₹2,450", photo: "anarkali", tint: "#1C2A24", ribbonColor: "#F43F5E" })),
+  t("new-summer-dress", "New · Summer Dress", "new-arrival", () => L.newArrival({ shop: "Lavender Lane", ribbon: "NEW", name: "Cotton Summer Dress", colors: ["#FFFFFF", "#BAE6FD", "#FED7AA"], sizes: ["S", "M", "L"], price: "₹1,850", photo: "whiteDress", tint: "#1F2937", ribbonColor: "#F43F5E", position: "center" })),
+  t("new-hoodie", "New · Hoodie", "new-arrival", () => L.newArrival({ shop: "Denim Den", ribbon: "NEW", name: "Fleece Hoodie", colors: ["#9CA3AF", "#111827", "#4D7C0F"], sizes: ["S", "M", "L", "XL", "XXL"], price: "₹1,299", photo: "hoodie", tint: "#1E293B", ribbonColor: "#0EA5E9", position: "center" })),
+  t("new-maxi-dress", "New · Maxi Dress", "new-arrival", () => L.newArrival({ shop: "Lavender Lane", ribbon: "NEW", name: "Flowing Maxi Dress", colors: ["#DC2626", "#111827", "#F5F5F4"], sizes: ["XS", "S", "M", "L", "XL"], price: "₹1,899", photo: "redDress", tint: "#14200F", ribbonColor: "#F59E0B", position: "center" })),
+
+  // ── Low stock ──────────────────────────────────────────────────────────────
+  t("product-low-stock", "Low Stock", "limited-stock", () => L.lowStock({ shop: "Time House", label: "Almost gone", name: "Classic White Watch", stock: "Only 4 left in store", left: 0.2, price: "₹3,499", cta: "Reserve now", photo: "watches", bg: "#F1F1EF" })),
+  t("low-leather-watch", "Low Stock · Watch", "limited-stock", () => L.lowStock({ shop: "Classic Watches", label: "Selling fast", name: "Leather Strap Watch", stock: "Only 3 left in store", left: 0.15, price: "₹2,799", cta: "Hold one", photo: "wristWatch", bg: "#EEF0F2" })),
+  t("low-keyboard", "Low Stock · Keyboard", "limited-stock", () => L.lowStock({ shop: "Tech Bazaar", label: "Almost gone", name: "Wireless Keyboard", stock: "Only 5 left this week", left: 0.25, price: "₹1,299", cta: "Reserve now", photo: "keyboard", bg: "#F3F4F6" })),
+  t("low-pearls", "Low Stock · Pearls", "limited-stock", () => L.lowStock({ shop: "Gold Leaf Jewellers", label: "Last few pieces", name: "Pearl Necklace Set", stock: "Only 2 sets left", left: 0.12, price: "₹4,999", cta: "Reserve now", photo: "pearls", bg: "#F5F0EB" })),
+
+  // ── Back in stock ──────────────────────────────────────────────────────────
+  t("product-back-in-stock", "Back in Stock", "restock", () => L.backInStock({ shop: "Glow Beauty", label: "Restocked today", name: "Rose Glow Makeup Kit", price: "₹1,150", cta: "Order before it's gone", stamp: "BACK IN STOCK", photo: "makeup", tint: "#FAE8D6", ink: "#3B1D1D", stampColor: "#BE123C" })),
+  t("back-mangoes", "Back · Mangoes", "restock", () => L.backInStock({ shop: "Fresh Fruits Corner", label: "Season's first batch", name: "Alphonso Mangoes", price: "₹599/dozen", cta: "Order a box", stamp: "BACK IN SEASON", photo: "mangoes", tint: "#FFF3D6", ink: "#4A2A00", stampColor: "#C2410C" })),
+  t("back-bomber", "Back · Jacket", "restock", () => L.backInStock({ shop: "Denim Den", label: "Restocked today", name: "Rust Bomber Jacket", price: "₹2,199", cta: "Grab your size", stamp: "BACK IN STOCK", photo: "bomber", tint: "#F1ECE6", ink: "#2A1A12", stampColor: "#B91C1C" })),
+  t("back-vitamins", "Back · Pharmacy", "restock", () => L.backInStock({ shop: "Care Plus Pharmacy", label: "Restocked today", name: "Vitamin C Tablets", price: "₹180/strip", cta: "Reserve a pack", stamp: "IN STOCK NOW", photo: "medicine", tint: "#E6F2FB", ink: "#0C2D48", stampColor: "#0369A1" })),
+
+  // ── Deal of the day ────────────────────────────────────────────────────────
+  t("product-deal-of-the-day", "Deal of the Day", "flash-sale", () => L.dealOfDay({ label: "Deal of the day", name: "Sweet Watermelon", price: "₹25/kg", mrp: "₹40", ends: "Ends tonight at 11:59 PM", photo: "watermelon", bg: "#FBFBF8", accent: "#E11D48", position: "left" })),
+  t("deal-pineapple", "Deal · Pineapple", "flash-sale", () => L.dealOfDay({ label: "Today only", name: "Juicy Pineapple", price: "₹45/pc", mrp: "₹70", ends: "Ends tonight at 9:00 PM", photo: "pineapple", bg: "#FFFFFF", accent: "#16A34A" })),
+  t("deal-cherries", "Deal · Cherries", "flash-sale", () => L.dealOfDay({ label: "Deal of the day", name: "Fresh Cherries", price: "₹299", mrp: "₹399", ends: "Today only · till 8 PM", photo: "cherries", bg: "#F3FBF9", accent: "#DC2626" })),
+  t("deal-mouse", "Deal · Mouse", "flash-sale", () => L.dealOfDay({ label: "Lightning deal", name: "Wireless Mouse", price: "₹499", mrp: "₹899", ends: "Deal ends at midnight", photo: "mouse", bg: "#FFFFFF", accent: "#2563EB" })),
+
+  // ── Bestseller ─────────────────────────────────────────────────────────────
+  t("product-bestseller", "Bestseller", "custom", () => L.bestseller({ shop: "Sweet Tooth Bakery", badge: "#1 Bestseller", name: "Chocolate Truffle Cake", rating: "4.9 · 500+ sold", price: "₹549", unit: "/ 500g", cta: "Pre-order", photo: "cake", tint: "#1C0E06" })),
+  t("best-biryani", "Bestseller · Biryani", "custom", () => L.bestseller({ shop: "Masala House", badge: "#1 Bestseller", name: "Chicken Dum Biryani", rating: "4.8 · 2,000+ orders", price: "₹229", unit: "/ plate", cta: "Order now", photo: "biryani", tint: "#1A0D05" })),
+  t("best-pizza", "Bestseller · Pizza", "custom", () => L.bestseller({ shop: "Slice Point", badge: "Most ordered", name: "Chef's Special Pizza", rating: "4.7 · 900+ sold", price: "₹349", unit: "/ medium", cta: "Order now", photo: "pizza2", tint: "#140A05" })),
+  t("best-latte", "Bestseller · Latte", "custom", () => L.bestseller({ shop: "Brew Bean Café", badge: "Café favourite", name: "Hazelnut Latte", rating: "4.9 · 1,200+ cups", price: "₹160", unit: "/ cup", cta: "Order now", photo: "latte", tint: "#1C120C" })),
+
+  // ── Collection strip ───────────────────────────────────────────────────────
+  t("product-collection", "Collection Strip", "new-arrival", () => L.collection({ label: "Riya Boutique", name: "Festive Collection", info: "12 new pieces · from ₹399", cta: "Browse all", items: [{ photo: "saree", name: "Saree", price: "₹4,299" }, { photo: "anarkali", name: "Anarkali", price: "₹2,450" }, { photo: "shirts", name: "Shirt", price: "₹799" }, { photo: "sweatshirt", name: "Sweatshirt", price: "₹899" }], bg: "#111111" })),
+  t("collection-jewellery", "Collection · Jewellery", "new-arrival", () => L.collection({ label: "Gold Leaf", name: "Wedding Edit", info: "40 designs · from ₹2,999", cta: "Visit store", items: [{ photo: "necklace", name: "Pendant", price: "₹8,500" }, { photo: "earrings", name: "Earrings", price: "₹6,200" }, { photo: "bracelet", name: "Bracelet", price: "₹9,800" }, { photo: "ring", name: "Ring", price: "₹4,999" }], bg: "#120E06" })),
+  t("collection-dresses", "Collection · Dresses", "new-arrival", () => L.collection({ label: "Lavender Lane", name: "Summer Dresses", info: "18 styles · from ₹899", cta: "Browse all", items: [{ photo: "redDress", name: "Maxi", price: "₹1,899" }, { photo: "redDress2", name: "Wrap", price: "₹1,650" }, { photo: "whiteDress", name: "Sundress", price: "₹1,850" }, { photo: "knitTop", name: "Knit", price: "₹999" }], bg: "#2A0A12" })),
+  t("collection-home", "Collection · Home", "new-arrival", () => L.collection({ label: "Home Nest", name: "Home Picks", info: "New décor · from ₹149", cta: "Visit store", items: [{ photo: "chair", name: "Chair", price: "₹6,499" }, { photo: "wallDecor", name: "Frames", price: "₹1,299" }, { photo: "succulent", name: "Planter", price: "₹199" }, { photo: "cactus", name: "Cactus", price: "₹149" }], bg: "#13261F" })),
+
+  // ── Quantity prices ────────────────────────────────────────────────────────
+  t("product-quantity-prices", "Quantity Prices", "offer", () => L.quantity({ shop: "Fresh Fruits Corner", name: "Kashmiri Apples", label: "Buy more, pay less", tiers: [["1 kg", "₹180"], ["3 kg", "₹500"], ["5 kg", "₹800"]], best: 1, photo: "apples", tint: "#3C0808", accent: "#7F1D1D" })),
+  t("qty-eggs", "Quantity · Eggs", "offer", () => L.quantity({ shop: "Daily Dairy", name: "Farm Fresh Eggs", label: "Buy more, pay less", tiers: [["6 eggs", "₹45"], ["12 eggs", "₹84"], ["30 eggs", "₹195"]], best: 2, photo: "eggs", tint: "#2B1A0A", accent: "#9A3412" })),
+  t("qty-rice", "Quantity · Rice", "offer", () => L.quantity({ shop: "Patel Kirana", name: "Basmati Rice", label: "Stock up and save", tiers: [["1 kg", "₹110"], ["5 kg", "₹520"], ["10 kg", "₹999"]], best: 1, photo: "rice", tint: "#2A2208", accent: "#854D0E" })),
+  t("qty-spices", "Quantity · Spices", "offer", () => L.quantity({ shop: "Masala Bazaar", name: "Stone-Ground Masala", label: "Buy more, pay less", tiers: [["100 g", "₹60"], ["250 g", "₹140"], ["500 g", "₹260"]], best: 2, photo: "spices", tint: "#3A1204", accent: "#9A3412" })),
+
+  // ── Food with sizes ────────────────────────────────────────────────────────
+  t("product-food-sizes", "Food with Sizes", "custom", () => L.foodSizes({ shop: "Slice Point", label: "Hot & fresh", name: "Farmhouse Pizza", options: ["Medium  ₹249", "Large  ₹399"], info: "Ready in 20 min · free delivery nearby", cta: "Order now", photo: "pizza", bg: "#1C1007", accent: "#FDBA74" })),
+  t("food-burger", "Food · Burger", "custom", () => L.foodSizes({ shop: "Grill Street", label: "Hot & juicy", name: "Double Cheese Burger", options: ["Single  ₹149", "Double  ₹219"], info: "Ready in 15 min · add fries ₹49", cta: "Order now", photo: "burger2", bg: "#1A0F08", accent: "#FB923C" })),
+  t("food-chai", "Food · Chai", "custom", () => L.foodSizes({ shop: "Chai Adda", label: "Fresh brew", name: "Masala Chai", options: ["Cutting  ₹15", "Full  ₹25"], info: "Served hot · open 6 AM to 11 PM", cta: "Order now", photo: "tea", bg: "#1E1208", accent: "#FCD34D" })),
+  t("food-bowl", "Food · Bowl", "custom", () => L.foodSizes({ shop: "Fit Bowl Kitchen", label: "Healthy & fresh", name: "Protein Power Bowl", options: ["Regular  ₹199", "Large  ₹279"], info: "High protein · 450 kcal", cta: "Order now", photo: "buddhaBowl", bg: "#0E2118", accent: "#86EFAC" })),
+
+  // ── Bottom bar ─────────────────────────────────────────────────────────────
+  t("bar-sneaker", "Bottom Bar · Sneaker", "new-arrival", () => L.bottomBar({ shop: "Step Up Shoes", tag: "Free delivery", name: "Everyday Runner", price: "₹1,899", mrp: "₹2,499", cta: "Buy now", photo: "sneaker", accent: "#2563EB" })),
+  t("bar-sofa", "Bottom Bar · Sofa", "new-stock", () => L.bottomBar({ shop: "Home Nest", tag: "Free installation", name: "Velvet 3-Seater Sofa", price: "₹24,999", mrp: "₹31,999", cta: "Book a visit", photo: "sofa", accent: "#0F766E" })),
+  t("bar-pancakes", "Bottom Bar · Pancakes", "custom", () => L.bottomBar({ shop: "Morning Café", tag: "Breakfast till 11", name: "Honey Pancake Stack", price: "₹189", cta: "Order now", photo: "pancakes", accent: "#D97706" })),
+  t("bar-jute-bag", "Bottom Bar · Jute Bag", "new-stock", () => L.bottomBar({ shop: "Paper Planet", tag: "Eco friendly", name: "Jute Shopping Bag", price: "₹149", mrp: "₹199", cta: "Buy now", photo: "tote", accent: "#65A30D" })),
+
+  // ── Coupon ─────────────────────────────────────────────────────────────────
+  t("coupon-bakery", "Coupon · Bakery", "offer", () => L.coupon({ shop: "Bake Studio", off: "20% OFF", offLabel: "on your next order", code: "SWEET20", note: "Show this at the counter", photo: "cupcakes", accent: "#DB2777" })),
+  t("coupon-fashion", "Coupon · Fashion", "offer", () => L.coupon({ shop: "Lavender Lane", off: "₹300 OFF", offLabel: "on bills above ₹1,999", code: "STYLE300", note: "Valid till Sunday", photo: "clothesRack", accent: "#7C3AED" })),
+  t("coupon-grocery", "Coupon · Grocery", "offer", () => L.coupon({ shop: "Patel Kirana", off: "10% OFF", offLabel: "on your monthly grocery", code: "KIRANA10", note: "Home delivery included", photo: "vegetables", accent: "#16A34A" })),
+  t("coupon-cafe", "Coupon · Café", "offer", () => L.coupon({ shop: "Brew Bean Café", off: "₹50 OFF", offLabel: "on any two coffees", code: "BREW50", note: "Valid 4 PM to 7 PM", photo: "latte", accent: "#92400E" })),
+
+  // ── Price drop ─────────────────────────────────────────────────────────────
+  t("drop-headphones", "Price Drop · Headphones", "sale", () => L.priceDrop({ shop: "SoundHub", label: "Price dropped", name: "Wired Studio Headphones", oldPrice: "₹2,499", newPrice: "₹1,799", save: "You save ₹700", cta: "Buy now", photo: "headphones2", bg: "#F5F7FB", accent: "#DC2626" })),
+  t("drop-jacket", "Price Drop · Jacket", "sale", () => L.priceDrop({ shop: "Denim Den", label: "Price dropped", name: "Rust Bomber Jacket", oldPrice: "₹2,999", newPrice: "₹2,199", save: "Save ₹800", cta: "Try it on", photo: "bomber", bg: "#F4F4F5", accent: "#B91C1C" })),
+  t("drop-speaker", "Price Drop · Speaker", "sale", () => L.priceDrop({ shop: "Tech Bazaar", label: "New lower price", name: "Bookshelf Speakers", oldPrice: "₹4,999", newPrice: "₹3,499", save: "Save ₹1,500", cta: "Buy now", photo: "speaker", bg: "#EFF6F6", accent: "#0F766E" })),
+  t("drop-bracelet", "Price Drop · Bracelet", "sale", () => L.priceDrop({ shop: "Gold Leaf Jewellers", label: "Price dropped", name: "Diamond Bracelet", oldPrice: "₹59,999", newPrice: "₹49,999", save: "Save ₹10,000", cta: "Visit store", photo: "diamondBracelet", bg: "#F6F3EE", accent: "#A16207" })),
+
+  // ── Big sale ───────────────────────────────────────────────────────────────
+  t("sale-fashion", "Big Sale · Fashion", "sale", () => L.bigSale({ word: "SALE", sub: "Up to 50% off", label: "On all summer wear this week", cta: "Shop now", photo: "redDress", bg: "#FDE047", ink: INK, accent: "#DC2626", ctaTone: "dark" })),
+  t("sale-shoes", "Big Sale · Shoes", "sale", () => L.bigSale({ word: "SALE", sub: "Flat 30% off", label: "Every pair of shoes in store", cta: "Visit store", photo: "brownShoes", bg: "#111827", ink: WHITE, accent: "#FBBF24", ctaTone: "light" })),
+  t("sale-electronics", "Big Sale · Electronics", "sale", () => L.bigSale({ word: "SALE", sub: "Up to 40% off", label: "Headphones, speakers and more", cta: "See deals", photo: "headphones3", bg: "#1D4ED8", ink: WHITE, accent: "#FDE047", ctaTone: "light" })),
+  t("sale-home", "Big Sale · Home", "sale", () => L.bigSale({ word: "SALE", sub: "Up to 35% off", label: "Furniture and home décor", cta: "Visit store", photo: "livingRoom", bg: "#ECFDF5", ink: "#064E3B", accent: "#059669", ctaTone: "dark" })),
+
+  // ── Four-product grid ──────────────────────────────────────────────────────
+  t("four-fashion", "Four · Fashion", "new-arrival", () => L.fourGrid({ label: "Lavender Lane", title: "New in this week", info: "4 new styles · from ₹999", cta: "See all", items: [{ photo: "redDress", name: "Maxi", price: "₹1,899" }, { photo: "whiteDress", name: "Sundress", price: "₹1,850" }, { photo: "knitTop", name: "Knit Top", price: "₹999" }, { photo: "joggers", name: "Joggers", price: "₹1,199" }], bg: "#FAF5FF", ink: "#3B0764" })),
+  t("four-bakery", "Four · Bakery", "new-stock", () => L.fourGrid({ label: "Bake Studio", title: "Today's bakes", info: "Fresh every morning", cta: "Order now", items: [{ photo: "cupcakes", name: "Cupcakes", price: "₹299" }, { photo: "donuts", name: "Donuts", price: "₹60" }, { photo: "cookies", name: "Cookies", price: "₹149" }, { photo: "cakeSlice", name: "Cake slice", price: "₹120" }], bg: "#2A1810", ink: WHITE })),
+  t("four-gadgets", "Four · Gadgets", "new-stock", () => L.fourGrid({ label: "Tech Bazaar", title: "Desk setup deals", info: "Free delivery in town", cta: "See all", items: [{ photo: "keyboard", name: "Keyboard", price: "₹1,299" }, { photo: "mouse", name: "Mouse", price: "₹699" }, { photo: "headphones2", name: "Audio", price: "₹1,799" }, { photo: "speaker", name: "Speaker", price: "₹3,499" }], bg: "#0B1B2B", ink: WHITE })),
+  t("four-fruits", "Four · Fruits", "new-stock", () => L.fourGrid({ label: "Fresh Fruits Corner", title: "Fruit basket", info: "Delivered by 10 AM", cta: "Order now", items: [{ photo: "mangoes", name: "Mangoes", price: "₹599" }, { photo: "pineapple", name: "Pineapple", price: "₹45" }, { photo: "cherries", name: "Cherries", price: "₹299" }, { photo: "apples", name: "Apples", price: "₹180" }], bg: "#F0FDF4", ink: "#14532D" })),
+
+  // ── Polaroid ───────────────────────────────────────────────────────────────
+  t("polaroid-earrings", "Polaroid · Earrings", "new-arrival", () => L.polaroid({ shop: "Gold Leaf Jewellers", label: "Handcrafted", name: "Sapphire Drop Earrings", price: "₹6,200", cta: "Visit store", caption: "made to order", photo: "earrings", bg: "#F5EFE6", ink: "#2B1E0F" })),
+  t("polaroid-cake", "Polaroid · Cake", "custom", () => L.polaroid({ shop: "Sweet Tooth Bakery", label: "Celebration cakes", name: "Chocolate Truffle Cake", price: "₹549", cta: "Pre-order", caption: "baked fresh daily", photo: "cake", bg: "#FBEFEA", ink: "#3B1D12" })),
+  t("polaroid-garden", "Polaroid · Garden", "new-stock", () => L.polaroid({ shop: "Green Pot Nursery", label: "Garden ready", name: "Potting Mix & Tools", price: "₹349", mrp: "₹449", cta: "Visit nursery", caption: "for your balcony", photo: "gardening", bg: "#EEF3E8", ink: "#1E3A1E" })),
+  t("polaroid-books", "Polaroid · Books", "new-stock", () => L.polaroid({ shop: "Paper Planet", label: "Back to school", name: "Notebooks & Books", price: "₹99", cta: "Visit store", caption: "school essentials", photo: "books", bg: "#EFF4FB", ink: "#0F2A4A" })),
+
+  // ── Menu card ──────────────────────────────────────────────────────────────
+  t("menu-south-indian", "Menu · South Indian", "custom", () => L.menuCard({ label: "Today's special", title: "South Indian Menu", dishes: [["Idli Sambar", "₹60"], ["Masala Dosa", "₹90"], ["Filter Coffee", "₹30"]], photo: "idli", bg: "#0E2016", accent: "#FACC15" })),
+  t("menu-dinner", "Menu · Dinner", "custom", () => L.menuCard({ label: "Masala House", title: "Tonight's Specials", dishes: [["Paneer Masala", "₹220"], ["Dal Makhani", "₹180"], ["Butter Naan", "₹40"]], photo: "curry", bg: "#1F0C06", accent: "#F97316" })),
+  t("menu-street-food", "Menu · Street Food", "custom", () => L.menuCard({ label: "Mumbai Bites", title: "Evening Menu", dishes: [["Pav Bhaji", "₹110"], ["Vada Pav", "₹25"], ["Misal Pav", "₹90"]], photo: "pav", bg: "#2A1104", accent: "#FCD34D" })),
+  t("menu-weekend", "Menu · Weekend", "custom", () => L.menuCard({ label: "The Green Table", title: "Weekend Menu", dishes: [["Garden Salad", "₹260"], ["Risotto", "₹380"], ["Tiramisu", "₹240"]], photo: "gourmet", bg: "#101820", accent: "#A3E635" })),
+
+  // ── Floating card ──────────────────────────────────────────────────────────
+  t("float-handbag", "Floating · Handbag", "new-arrival", () => L.floatingCard({ shop: "Bag Story", label: "New colour", name: "Cherry Red Handbag", price: "₹2,299", cta: "Visit store", photo: "redBag", from: "#FDE2E4", to: "#F9A8B4", ink: INK, tagColor: "#BE123C" })),
+  t("float-watch", "Floating · Watch", "new-arrival", () => L.floatingCard({ shop: "Classic Watches", label: "Gift idea", name: "Minimal Leather Watch", price: "₹2,799", cta: "Visit store", photo: "wristWatch", from: "#1E3A8A", to: "#0F172A", ink: WHITE, tagColor: "#1E3A8A" })),
+  t("float-serum", "Floating · Serum", "new-arrival", () => L.floatingCard({ shop: "Glow Beauty", label: "Skin care", name: "Vitamin C Face Serum", price: "₹549", cta: "Order now", photo: "serum", from: "#FED7AA", to: "#FDBA74", ink: "#431407", tagColor: "#C2410C" })),
+  t("float-chocolate", "Floating · Chocolate", "new-arrival", () => L.floatingCard({ shop: "Cocoa Craft", label: "Handmade", name: "Dark Chocolate Bar", price: "₹180", cta: "Order now", photo: "chocolate", from: "#78350F", to: "#2A1205", ink: WHITE, tagColor: "#78350F" })),
+
+  // ── Buy one get one ────────────────────────────────────────────────────────
+  t("bogo-donuts", "BOGO · Donuts", "offer", () => L.bogo({ shop: "Bake Studio", offer: "Buy 1 Get 1 Free", name: "On all glazed donuts", info: "Every Friday, 4 to 8 PM", cta: "Grab yours", photo: "donuts", bg: "#3B0A2A", accent: "#EC4899" })),
+  t("bogo-tees", "BOGO · Tees", "offer", () => L.bogo({ shop: "Cotton Co.", offer: "Buy 1 Get 1 Free", name: "On all cotton tees", info: "This weekend only", cta: "Visit store", photo: "tee", bg: "#111827", accent: "#F59E0B" })),
+  t("bogo-pizza", "BOGO · Pizza", "offer", () => L.bogo({ shop: "Slice Point", offer: "Buy 1 Get 1 Free", name: "All medium pizzas", info: "Every Tuesday · dine-in or takeaway", cta: "Order now", photo: "pizza2", bg: "#1C0A05", accent: "#DC2626" })),
+  t("bogo-ice-cream", "BOGO · Ice Cream", "offer", () => L.bogo({ shop: "Cream Corner", offer: "Buy 2 Get 1 Free", name: "On all ice cream cones", info: "Till stocks last", cta: "Grab yours", photo: "iceCream", bg: "#4A2B05", accent: "#F59E0B" })),
+
+  // ── Customer review ────────────────────────────────────────────────────────
+  t("review-chai", "Review · Chai", "custom", () => L.review({ shop: "Chai Adda", quote: "“Best masala chai in the whole area!”", author: "Priya S. · regular customer", name: "Masala Chai", price: "₹25", photo: "chai", bg: "#FFF8EE", ink: "#2A1A0A", accent: "#D97706" })),
+  t("review-cake", "Review · Cake", "custom", () => L.review({ shop: "Sweet Tooth Bakery", quote: "“The berry cake was gone in minutes!”", author: "Rahul M. · ordered for a birthday", name: "Berry Cream Cake", price: "₹120", photo: "cakeSlice", bg: "#FFF1F2", ink: "#4C0519", accent: "#E11D48" })),
+  t("review-shoes", "Review · Shoes", "custom", () => L.review({ shop: "Step Up Shoes", quote: "“Comfortable from day one. Great fit!”", author: "Arjun K. · verified buyer", name: "Leather Oxford Shoes", price: "₹2,999", photo: "brownShoes", bg: "#F7F3EE", ink: "#2A1A0E", accent: "#B45309" })),
+  t("review-salad", "Review · Salad", "custom", () => L.review({ shop: "Fit Bowl Kitchen", quote: "“Fresh, filling and actually tasty.”", author: "Neha P. · lunch regular", name: "Chicken Salad Bowl", price: "₹229", photo: "saladBowl", bg: "#F0FDF4", ink: "#052E16", accent: "#16A34A" })),
 ];
 
-function buildTemplate(t: Template) {
+function buildTemplate(entry: Entry) {
   const now = new Date().toISOString();
+  const { background, elements } = entry.design();
   return NotificationDesignSchema.parse({
     schemaVersion: 2,
-    id: t.slug,
-    name: t.name,
-    category: t.category,
+    id: entry.slug,
+    name: entry.name,
+    category: CATEGORY_TYPES[entry.categorySlug],
     status: "DRAFT",
-    canvas: { width: CANVAS_W, height: CANVAS_H, background: { type: "SOLID", color: t.background } },
+    canvas: { width: 400, height: 200, background: { type: "SOLID", color: background } },
     timeline: { durationMs: 3000 },
-    elements: t.elements(),
+    elements,
     metadata: { createdAt: now, updatedAt: now, source: "SHOPROOM_TEMPLATE" },
   });
 }
 
-export const TEMPLATES = TEMPLATE_LIST.map((t) => ({
-  slug: t.slug,
-  name: t.name,
-  categorySlug: t.categorySlug,
-  build: () => buildTemplate(t),
+export const TEMPLATES = CATALOG.map((entry) => ({
+  slug: entry.slug,
+  name: entry.name,
+  categorySlug: entry.categorySlug,
+  build: () => buildTemplate(entry),
 }));

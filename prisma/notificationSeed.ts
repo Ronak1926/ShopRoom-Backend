@@ -1,11 +1,11 @@
 /**
  * prisma/notificationSeed.ts — Seeds the notification catalog: semantic
- * categories, the animation library, and the NEW_ARRIVAL starter template
- * authored as a full v2 composition tree. Idempotent (upsert by slug).
+ * categories, the animation library, and the CounterCircle product-banner
+ * templates authored as v2 composition trees. Idempotent (upsert by slug).
  *
- * Only NEW_ARRIVAL is authored for now — the remaining CounterCircle templates are
- * added once the generic composition engine renders and edits it end to end.
- * Any older (v1) templates are deactivated so listings stay consistent.
+ * Any template whose slug is no longer in the catalog is deactivated, so
+ * listings only show the current set. Designs shopkeepers already cloned from
+ * an old template are their own rows and are not touched.
  */
 
 import type { PrismaClient } from "../src/generated/client.js";

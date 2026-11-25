@@ -168,8 +168,9 @@ describe("browser sessions in HttpOnly cookies", { skip: !enabled }, () => {
   });
 
   describe("requests another site could have started", () => {
+    // Like the web app, which sends the session-mode header on every request.
     const write = (cookie: string, headers: Record<string, string>) =>
-      t.call("PATCH", "/api/customers/me", { body: { fullName: "Asha Rao" }, ...withCookie("sr_customer", cookie, headers) });
+      t.call("PATCH", "/api/customers/me", { body: { fullName: "Asha Rao" }, ...withCookie("sr_customer", cookie, { ...COOKIE_MODE, ...headers }) });
 
     it("refuses a cookie-authenticated write from an origin that is not allowed, and allows the web app", async () => {
       process.env.CORS_ORIGINS = APP;
@@ -182,6 +183,18 @@ describe("browser sessions in HttpOnly cookies", { skip: !enabled }, () => {
       assert.equal((await write(cookie, { Origin: `${APP}/` })).status, 200, "a trailing slash does not matter");
       assert.equal((await write(cookie, { "Sec-Fetch-Site": "cross-site" })).status, 403, "no Origin, but the browser says cross-site");
       assert.equal((await write(cookie, {})).status, 200, "no Origin and no browser hints: a script, not a browser");
+    });
+
+    it("also needs the web app's session-mode header, which another site cannot add without a pre-flight", async () => {
+      process.env.CORS_ORIGINS = APP;
+      const c = await customer();
+      const cookie = valueOf(sessionCookie((await cookieLogin(c.email)).headers, "sr_customer")!);
+      const bare = (headers: Record<string, string>) => t.call("PATCH", "/api/customers/me", { body: { fullName: "Asha Rao" }, ...withCookie("sr_customer", cookie, headers) });
+
+      assert.equal((await bare({ Origin: APP })).status, 403, "an allowed origin is not enough without the header");
+      assert.equal((await bare({})).status, 403, "nor is a request with no origin");
+      assert.equal((await bare({ ...COOKIE_MODE, Origin: APP })).status, 200, "the web app sends both");
+      assert.equal((await bare({ "X-Session-Mode": "token", Origin: APP })).status, 403, "only the exact value counts");
     });
 
     it("only guards writes made with the cookie: reads, and requests with a header token, are not affected", async () => {

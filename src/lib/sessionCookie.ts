@@ -74,12 +74,17 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 /**
  * CSRF guard for requests authenticated by cookie (the browser attached it, so the request may have been
- * started by another site). Reads are exempt; a write must come from an allowed origin. A request with no
- * Origin is a non-browser client unless the browser marks it cross-site.
+ * started by another site). Reads are exempt; a write must carry the web app's `X-Session-Mode: cookie`
+ * header and come from an allowed origin. A request with no Origin is a non-browser client unless the
+ * browser marks it cross-site.
  */
 export function isTrustedWrite(req: Pick<Request, "method" | "headers">, allowed: string[] | null = allowedOrigins()): boolean {
   if (SAFE_METHODS.has(req.method)) return true;
   if (allowed === null) return true;
+  // A second, independent check, for deployments where the cookie is SameSite=None (web app and API on
+  // different sites): the web app sends this header on every request, and another site cannot add a
+  // custom header without a CORS preflight, which only an allowed origin passes.
+  if (req.headers["x-session-mode"] !== "cookie") return false;
   const origin = req.headers.origin;
   if (typeof origin === "string") return isAllowedOrigin(origin, allowed);
   return req.headers["sec-fetch-site"] !== "cross-site";

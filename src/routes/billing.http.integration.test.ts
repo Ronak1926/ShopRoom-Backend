@@ -51,6 +51,32 @@ describe("plan expiry, billing and renewal", { skip: !enabled }, () => {
     },
   });
 
+  describe("choosing a plan while one is running", () => {
+    const order = (token: string, planType: string) => t.call("POST", "/api/shopkeeper/billing/order", { token, body: { planType } });
+
+    it("refuses a lower plan, because its limits would replace the days already paid for at a higher tier", async () => {
+      const s = await shop(30 * DAY, "3m");
+      for (const lower of ["1m", "2m"]) {
+        const res = await order(s.token, lower);
+        assert.equal(res.status, 409, lower);
+        assert.match(res.json.message, /3 Months plan runs until .* after it ends; until then you can extend it or upgrade/);
+      }
+      assert.equal(await t.prisma.paymentOrder.count(), 0, "no order was opened at Razorpay or recorded");
+    });
+
+    it("always allows extending the current plan or upgrading", async () => {
+      const s = await shop(30 * DAY, "2m");
+      assert.equal((await order(s.token, "2m")).status, 200, "extend");
+      assert.equal((await order(s.token, "3m")).status, 200, "upgrade");
+      assert.equal((await order(s.token, "1m")).status, 409, "but not down");
+    });
+
+    it("allows any plan once the current one has ended", async () => {
+      const s = await shop(-DAY, "3m");
+      for (const plan of ["1m", "2m", "3m"]) assert.equal((await order(s.token, plan)).status, 200, plan);
+    });
+  });
+
   describe("an expired plan", () => {
     it("refuses to send and says how to fix it, without spending the daily allowance", async () => {
       const s = await shop(-DAY);

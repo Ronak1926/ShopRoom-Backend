@@ -87,8 +87,7 @@ export async function updateShopkeeperDraft(
 
   await prisma.shopkeeperDraft.update({
     where: { id: draftId },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    data: { currentStep: step, data: merged as any },
+    data: { currentStep: step, data: merged as Prisma.InputJsonObject },
   });
 }
 
@@ -129,9 +128,8 @@ export async function sendPhoneOtp(draftId: string, phoneNumber: string) {
   const merged = { ...existingData, phoneNumber };
   await prisma.shopkeeperDraft.update({
     where: { id: draftId },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     data: {
-      data: merged as any,
+      data: merged as Prisma.InputJsonObject,
       ...(existingData.phoneNumber !== phoneNumber ? { phoneVerified: false } : {}),
     },
   });

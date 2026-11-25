@@ -45,6 +45,29 @@ describe("GET /api/notifications/templates?ids=", { skip: !enabled }, () => {
     }
   });
 
+  it("returns every requested template when no limit is given, and refuses a limit that would cut them off", async () => {
+    const shop = await createShop(t.prisma);
+    const token = t.shopkeeperToken(shop.shopkeeperId);
+    const suffix = `${Date.now()}${Math.floor(Math.random() * 1e6)}`;
+    const category = await t.prisma.notificationCategory.create({ data: { slug: `ids-limit-${suffix}`, name: "Ids limit" } });
+    const rows = await Promise.all(
+      Array.from({ length: 12 }, (_, n) =>
+        t.prisma.notificationTemplate.create({ data: { slug: `ids-limit-${suffix}-${n}`, name: `T${n}`, categoryId: category.id, designJson: {} }, select: { id: true } }),
+      ),
+    );
+    const ids = rows.map((r) => r.id).join(",");
+    try {
+      const all = await t.call("GET", `/api/notifications/templates?ids=${ids}`, { token });
+      assert.equal(all.status, 200);
+      assert.equal((all.json as ListBody).data.items.length, 12, "the default page of 10 must not cut a request for 12 ids short");
+      assert.equal((await t.call("GET", `/api/notifications/templates?ids=${ids}&limit=5`, { token })).status, 400, "a limit below the number of ids would hide some");
+      assert.equal((await t.call("GET", `/api/notifications/templates?limit=5`, { token })).status, 200, "without ids a limit is just a page size");
+    } finally {
+      await t.prisma.notificationTemplate.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
+      await t.prisma.notificationCategory.delete({ where: { id: category.id } });
+    }
+  });
+
   it("rejects more than one page of ids and an empty list", async () => {
     const shop = await createShop(t.prisma);
     const token = t.shopkeeperToken(shop.shopkeeperId);

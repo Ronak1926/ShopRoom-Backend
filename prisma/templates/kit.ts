@@ -75,9 +75,16 @@ export const bottomScrim = (hex: string) => linear(180, [[0, alpha(hex, 0.3)], [
 export const fadeFromLeft = (hex: string) => linear(90, [[0, hex], [0.32, alpha(hex, 0)]]);
 
 interface PhotoOpts { position?: string; overlay?: Obj; radius?: number; border?: Obj; shadow?: boolean; z?: number; anim?: Obj }
+/**
+ * `cc=sample` marks a template's stock photo as a placeholder. The CDN ignores it; the web app looks
+ * for it (features/notifications/sampleContent.ts) to warn before a shop sends a banner that still
+ * shows a photo that is not its own. A replaced photo has a different URL, so the marker goes with it.
+ */
+const SAMPLE_MARKER = "cc=sample";
+
 export function photo(id: string, name: PhotoName, x: number, y: number, w: number, h: number, o: PhotoOpts = {}) {
   return node(id, "IMAGE", x, y, w, h, {
-    asset: { type: "IMAGE", url: `https://images.unsplash.com/photo-${PHOTOS[name]}?w=900&q=75&auto=format&fit=crop`, attribution: { provider: "UNSPLASH" } },
+    asset: { type: "IMAGE", url: `https://images.unsplash.com/photo-${PHOTOS[name]}?w=900&q=75&auto=format&fit=crop&${SAMPLE_MARKER}`, attribution: { provider: "UNSPLASH" } },
     image: { fit: "cover", position: o.position ?? "center", ...(o.overlay ? { overlay: { gradient: o.overlay, opacity: 1 } } : {}) },
     style: {
       ...(o.radius != null ? { borderRadius: o.radius } : {}),

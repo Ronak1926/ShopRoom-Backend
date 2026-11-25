@@ -11,7 +11,8 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "../database/prisma.js";
 import { createRazorpayOrder, isMockOrderId, publicKeyId, PaymentProviderError, type RazorpayOrderResult } from "../lib/razorpay.js";
 import { PaymentError } from "../utils/paymentError.js";
-import { PLANS, isPlanId, type PlanId } from "./plans.js";
+import { isPlanActive } from "./billing.service.js";
+import { PLANS, isPlanId, planRank, type PlanId } from "./plans.js";
 
 /**
  * An unpaid order for the same buyer and plan is handed out again for this long, so a double
@@ -90,7 +91,26 @@ export async function createRegistrationOrder(draftId: string, planType: unknown
   return createCheckoutOrder({ purpose: "REGISTRATION", draftId, planType: plan });
 }
 
-/** Renewal payment for a signed-in shopkeeper. */
+const END_DATE = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" });
+
+/**
+ * Renewal payment for a signed-in shopkeeper.
+ *
+ * A purchase replaces the plan type at once but stacks its days after the current end, so buying a
+ * lower plan while a higher one is running would turn the higher days already paid for into lower
+ * ones. That is refused until the higher plan ends; extending it or upgrading is always fine, and
+ * so is any plan once the current one has expired. (An order that was already open, or paid in
+ * another tab, still settles: money that has moved is never refused.)
+ */
 export async function createRenewalOrder(shopkeeperId: string, planType: unknown): Promise<RazorpayOrderResult> {
-  return createCheckoutOrder({ purpose: "RENEWAL", shopkeeperId, planType: parsePlan(planType) });
+  const plan = parsePlan(planType);
+  const owner = await prisma.shopkeeper.findUnique({ where: { id: shopkeeperId }, select: { planType: true, planExpiresAt: true } });
+  if (owner && isPlanActive(owner.planExpiresAt) && planRank(plan) < planRank(owner.planType)) {
+    const current = isPlanId(owner.planType) ? PLANS[owner.planType].label : "current";
+    throw new PaymentError(
+      409,
+      `Your ${current} plan runs until ${END_DATE.format(owner.planExpiresAt)}. You can switch to ${PLANS[plan].label} after it ends; until then you can extend it or upgrade.`,
+    );
+  }
+  return createCheckoutOrder({ purpose: "RENEWAL", shopkeeperId, planType: plan });
 }

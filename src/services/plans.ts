@@ -22,6 +22,14 @@ export const PLANS: Record<PlanId, PlanInfo> = {
 
 export const PLAN_IDS = Object.keys(PLANS) as PlanId[];
 
+/** 1 for the entry plan up to 3 for the longest: a higher rank includes everything a lower one does. */
+const PLAN_RANK: Record<PlanId, number> = { "1m": 1, "2m": 2, "3m": 3 };
+
+/** The rank of a stored plan type; anything unrecognised counts as the entry plan. */
+export function planRank(planType: string | null | undefined): number {
+  return isPlanId(planType) ? PLAN_RANK[planType] : 1;
+}
+
 export function isPlanId(value: unknown): value is PlanId {
   return typeof value === "string" && value in PLANS;
 }

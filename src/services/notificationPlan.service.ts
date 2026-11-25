@@ -7,6 +7,7 @@
  */
 
 import { prisma } from "../database/prisma.js";
+import { isPlanId, planRank } from "./plans.js";
 
 export type PlanType = "1m" | "2m" | "3m";
 
@@ -26,8 +27,6 @@ export interface PlanCapabilities {
   ADVANCED_TEMPLATE_EDITING: boolean;
   CUSTOM_ANIMATION: boolean;
 }
-
-const PLAN_RANK: Record<PlanType, number> = { "1m": 1, "2m": 2, "3m": 3 };
 
 const CAPABILITIES: Record<PlanType, PlanCapabilities> = {
   "1m": {
@@ -87,10 +86,8 @@ export function meetsRequiredPlan(
   planType: string | null | undefined,
   requiredPlan: string | null | undefined,
 ): boolean {
-  if (!requiredPlan) return true;
-  const required = PLAN_RANK[requiredPlan as PlanType];
-  if (!required) return true;
-  return PLAN_RANK[normalizePlan(planType)] >= required;
+  if (!requiredPlan || !isPlanId(requiredPlan)) return true;
+  return planRank(planType) >= planRank(requiredPlan);
 }
 
 /**

@@ -80,7 +80,7 @@ export async function raiseAlert(kind: AlertKind, message: string, now = Date.no
   const url = process.env.ALERT_WEBHOOK_URL;
   if (url) {
     try {
-      await axios.post(url, { text: `ShopRoom alert (${kind}): ${message}` }, { timeout: WEBHOOK_TIMEOUT_MS, maxRedirects: 0 });
+      await axios.post(url, { text: `CounterCircle alert (${kind}): ${message}` }, { timeout: WEBHOOK_TIMEOUT_MS, maxRedirects: 0 });
     } catch (err) {
       logger.warn("Alert webhook not delivered", { kind }, err);
     }

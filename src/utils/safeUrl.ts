@@ -11,7 +11,7 @@
  *   - point devices at internal addresses (localhost, private ranges).
  *
  * Link targets (OPEN_URL) must be plain public https/http URLs. Image sources
- * must additionally come from a host ShopRoom knows: our own Cloudinary
+ * must additionally come from a host CounterCircle knows: our own Cloudinary
  * account and the two stock-photo providers.
  */
 

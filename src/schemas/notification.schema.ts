@@ -41,7 +41,7 @@ export const NODE_TYPES = [
 ] as const;
 export const NodeTypeSchema = z.enum(NODE_TYPES);
 
-/** Image sources are limited to hosts ShopRoom trusts (see utils/safeUrl.ts). */
+/** Image sources are limited to hosts CounterCircle trusts (see utils/safeUrl.ts). */
 const imageUrl = z.string().max(2048).refine(isAllowedImageUrl, {
   message: "Image URL must be an https link from an allowed image host",
 });
@@ -51,7 +51,7 @@ const linkUrl = z.string().max(2048).refine(isSafeLinkUrl, {
   message: "Must be a public http(s) URL",
 });
 
-/** Reference to a ShopRoom-owned decorative asset (SVG art, image, or Lottie). */
+/** Reference to a CounterCircle-owned decorative asset (SVG art, image, or Lottie). */
 export const AssetRefSchema = z.object({
   type: z.enum(["SVG", "IMAGE", "LOTTIE"]).default("SVG"),
   assetId: z.string().max(120).optional(),

@@ -84,7 +84,7 @@ describe("GST invoices", { skip: !enabled }, () => {
     assert.equal(inv.buyer.name, "Sunrise Textiles");
     assert.equal(inv.buyer.address, "12 Market Road, Pune, Maharashtra - 411001");
     assert.deepEqual([inv.placeOfSupplyCode, inv.placeOfSupplyName], ["27", "Maharashtra"]);
-    assert.equal(inv.description, "ShopRoom 1 Month plan (30 days)");
+    assert.equal(inv.description, "CounterCircle 1 Month plan (30 days)");
     assert.equal(inv.sac, "998439");
     assert.deepEqual([inv.tax.kind, inv.tax.taxable, inv.tax.cgst, inv.tax.sgst, inv.tax.igst], ["CGST_SGST", 33_814, 3_043, 3_043, 0]);
     assert.equal(inv.tax.taxable + inv.tax.cgst + inv.tax.sgst + inv.tax.igst, inv.total);

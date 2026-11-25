@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1
 #
-# Production image for the ShopRoom API.
-#   docker build -t shoproom-backend .
-#   docker run --env-file .env.production -p 3001:3001 shoproom-backend
+# Production image for the CounterCircle API.
+#   docker build -t countercircle-backend .
+#   docker run --env-file .env.production -p 3001:3001 countercircle-backend
 #
 # Migrations are a separate, explicit step (they must run once per release, not
-# once per container):  docker run --rm --env-file .env.production shoproom-backend \
+# once per container):  docker run --rm --env-file .env.production countercircle-backend \
 #                          pnpm exec prisma migrate deploy
 # The image keeps the Prisma CLI for that reason.
 

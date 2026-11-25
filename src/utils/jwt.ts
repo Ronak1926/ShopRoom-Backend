@@ -1,5 +1,5 @@
 /**
- * utils/jwt.ts — All JWT helpers for ShopRoom.
+ * utils/jwt.ts — All JWT helpers for CounterCircle.
  *
  * TOKEN TYPES
  * ────────────

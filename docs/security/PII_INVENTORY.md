@@ -25,7 +25,7 @@ Last reviewed: 2026-10-30. Update this file in the same change that adds or alte
 | Notification preferences (quiet hours, weekend sending, expiry, studio defaults) | Shopkeeper | `NotificationPreference.settings` | Enforced on scheduled sends; studio defaults | Life of the account | Account deletion |
 | Notification designs, assets, send history | Shopkeeper | `NotificationDesign*`, `NotificationAsset`, `NotificationSend`, Cloudinary | The product | Life of the account | Account deletion (database and Cloudinary) |
 
-Card numbers and UPI details never reach ShopRoom; Razorpay Checkout handles them.
+Card numbers and UPI details never reach CounterCircle; Razorpay Checkout handles them.
 
 ## Processors
 

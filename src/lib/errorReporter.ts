@@ -41,7 +41,7 @@ export function parseDsn(dsn: string): ParsedDsn | null {
     if (!url.username || !projectId || !/^https?:$/.test(url.protocol)) return null;
     return {
       endpoint: `${url.protocol}//${url.host}/api/${projectId}/envelope/`,
-      authHeader: `Sentry sentry_version=7, sentry_client=shoproom-backend/1.0, sentry_key=${url.username}`,
+      authHeader: `Sentry sentry_version=7, sentry_client=countercircle-backend/1.0, sentry_key=${url.username}`,
     };
   } catch {
     return null;

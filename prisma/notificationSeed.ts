@@ -3,7 +3,7 @@
  * categories, the animation library, and the NEW_ARRIVAL starter template
  * authored as a full v2 composition tree. Idempotent (upsert by slug).
  *
- * Only NEW_ARRIVAL is authored for now — the remaining ShopRoom templates are
+ * Only NEW_ARRIVAL is authored for now — the remaining CounterCircle templates are
  * added once the generic composition engine renders and edits it end to end.
  * Any older (v1) templates are deactivated so listings stay consistent.
  */

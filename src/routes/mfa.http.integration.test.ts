@@ -76,7 +76,7 @@ describe("two-step verification", { skip: !enabled }, () => {
       assert.equal(setup.status, 200);
       const { secret, otpauthUrl } = setup.json.data;
       assert.match(secret, /^[A-Z2-7]{32}$/);
-      assert.ok(otpauthUrl.startsWith("otpauth://totp/ShopRoom%3A") && otpauthUrl.includes(`secret=${secret}`));
+      assert.ok(otpauthUrl.startsWith("otpauth://totp/CounterCircle%3A") && otpauthUrl.includes(`secret=${secret}`));
 
       const stored = await t.prisma.mfaCredential.findFirstOrThrow();
       assert.ok(!stored.secretEnc.includes(secret), "the secret is not stored in the clear");

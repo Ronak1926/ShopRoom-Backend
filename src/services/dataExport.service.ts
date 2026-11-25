@@ -1,5 +1,5 @@
 /**
- * services/dataExport.service.ts — "Download my data": everything ShopRoom holds about one account,
+ * services/dataExport.service.ts — "Download my data": everything CounterCircle holds about one account,
  * as plain JSON the person can read or take elsewhere.
  *
  * What is left out, deliberately:
@@ -93,7 +93,7 @@ export async function exportCustomerData(customerId: string) {
   };
 
   return {
-    format: "shoproom-customer-export-v1",
+    format: "countercircle-customer-export-v1",
     exportedAt: new Date().toISOString(),
     account: {
       id: customer.id,
@@ -226,7 +226,7 @@ export async function exportShopkeeperData(shopkeeperId: string) {
   };
 
   return {
-    format: "shoproom-shopkeeper-export-v1",
+    format: "countercircle-shopkeeper-export-v1",
     exportedAt: new Date().toISOString(),
     account: {
       id: shopkeeper.id,

@@ -85,7 +85,7 @@ export function matchTotp(secret: string, code: string, nowMs = Date.now(), drif
 }
 
 /** The link authenticator apps open to add the account (also what a QR code carries). */
-export function otpauthUrl(secret: string, accountLabel: string, issuer = "ShopRoom"): string {
+export function otpauthUrl(secret: string, accountLabel: string, issuer = "CounterCircle"): string {
   const label = encodeURIComponent(`${issuer}:${accountLabel}`);
   return `otpauth://totp/${label}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=${DIGITS}&period=${TOTP_STEP_SECONDS}`;
 }

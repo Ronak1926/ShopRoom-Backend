@@ -1,5 +1,5 @@
 /**
- * services/notificationTemplate.service.ts — ShopRoom-provided starting designs.
+ * services/notificationTemplate.service.ts — CounterCircle-provided starting designs.
  *
  * A template is just an initial design. Cloning it produces a shopkeeper-owned
  * NotificationDesign; the template itself is never mutated (master plan §22).

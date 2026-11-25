@@ -485,7 +485,7 @@ model RoomViewerState {
 
 // ─── Customizable Notifications ─────────────────────────────────────────────────
 // A notification is a data-driven design document (designJson), not a hard-coded
-// component. ShopRoom templates and shopkeeper custom notifications are the same
+// component. CounterCircle templates and shopkeeper custom notifications are the same
 // kind of object once they enter the rendering pipeline.
 
 enum NotificationDesignStatus {
@@ -518,7 +518,7 @@ model NotificationCategory {
   @@index([isActive])
 }
 
-/// ShopRoom-provided starting design. Cloned into a shopkeeper-owned design.
+/// CounterCircle-provided starting design. Cloned into a shopkeeper-owned design.
 model NotificationTemplate {
   id            String               @id @default(cuid())
   slug          String               @unique

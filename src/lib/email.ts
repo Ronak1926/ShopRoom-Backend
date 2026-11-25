@@ -21,11 +21,11 @@ export async function sendOtpEmail(to: string, code: string) {
   await transporter.sendMail({
     from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
     to,
-    subject: "Your ShopRoom verification code",
+    subject: "Your CounterCircle verification code",
     html: `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#F5F2FF;border-radius:12px;">
         <div style="text-align:center;margin-bottom:24px;">
-          <span style="font-size:22px;font-weight:700;color:#19192F;">🛍️ ShopRoom</span>
+          <span style="font-size:22px;font-weight:700;color:#19192F;">CounterCircle</span>
         </div>
         <div style="background:#fff;border-radius:10px;padding:32px;text-align:center;">
           <p style="font-size:16px;color:#474554;margin:0 0 16px;">Your verification code is:</p>
@@ -45,13 +45,13 @@ export async function sendPasswordResetEmail(to: string, link: string) {
   await transporter.sendMail({
     from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
     to,
-    subject: "Reset your ShopRoom password",
-    text: `Use this link to choose a new ShopRoom password (valid for 30 minutes):\n\n${link}\n\nIf you didn't ask for this, ignore this email. Your password won't change.`,
+    subject: "Reset your CounterCircle password",
+    text: `Use this link to choose a new CounterCircle password (valid for 30 minutes):\n\n${link}\n\nIf you didn't ask for this, ignore this email. Your password won't change.`,
     html: `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#F5F2FF;border-radius:12px;">
-        <div style="text-align:center;margin-bottom:24px;"><span style="font-size:22px;font-weight:700;color:#19192F;">ShopRoom</span></div>
+        <div style="text-align:center;margin-bottom:24px;"><span style="font-size:22px;font-weight:700;color:#19192F;">CounterCircle</span></div>
         <div style="background:#fff;border-radius:10px;padding:32px;text-align:center;">
-          <p style="font-size:16px;color:#474554;margin:0 0 20px;">Choose a new password for your ShopRoom account.</p>
+          <p style="font-size:16px;color:#474554;margin:0 0 20px;">Choose a new password for your CounterCircle account.</p>
           <a href="${escapeHtml(link)}" style="display:inline-block;background:#4329BB;color:#fff;text-decoration:none;font-weight:600;padding:12px 24px;border-radius:10px;">Reset password</a>
           <p style="font-size:13px;color:#474554;margin:20px 0 0;">This link works once and expires in <strong>30 minutes</strong>.</p>
         </div>
@@ -75,7 +75,7 @@ export async function sendContactEmail(to: string, contact: ContactMessage) {
     from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
     to,
     replyTo: contact.email,
-    subject: `[ShopRoom contact] ${contact.subject}`.replace(/[\r\n]+/g, " ").slice(0, 200),
+    subject: `[CounterCircle contact] ${contact.subject}`.replace(/[\r\n]+/g, " ").slice(0, 200),
     text: `From: ${contact.name} <${contact.email}>\n\n${contact.message}`,
     html: `<p><strong>From:</strong> ${escapeHtml(contact.name)} &lt;${escapeHtml(contact.email)}&gt;</p><p style="white-space:pre-wrap">${escapeHtml(contact.message)}</p>`,
   });
@@ -102,7 +102,7 @@ const RECEIPT_DATE = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "
 const formatRupees = (paise: number) => `₹${(paise / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export async function sendPaymentReceiptEmail(to: string, receipt: PaymentReceipt) {
-  const what = receipt.purpose === "REGISTRATION" ? "ShopRoom sign-up" : "ShopRoom plan renewal";
+  const what = receipt.purpose === "REGISTRATION" ? "CounterCircle sign-up" : "CounterCircle plan renewal";
   const rows: [string, string][] = [
     ["Shop", receipt.shopName],
     ["For", `${what}, ${receipt.planLabel} plan`],
@@ -115,7 +115,7 @@ export async function sendPaymentReceiptEmail(to: string, receipt: PaymentReceip
   const text = [
     `${greeting}`,
     "",
-    `Thank you. We received your payment of ${formatRupees(receipt.amount)} for the ${receipt.planLabel} ShopRoom plan.`,
+    `Thank you. We received your payment of ${formatRupees(receipt.amount)} for the ${receipt.planLabel} CounterCircle plan.`,
     "",
     ...rows.map(([label, value]) => `${label}: ${value}`),
     "",
@@ -123,7 +123,7 @@ export async function sendPaymentReceiptEmail(to: string, receipt: PaymentReceip
   ].join("\n");
   const html = `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#F5F2FF;border-radius:12px;">
-        <div style="text-align:center;margin-bottom:24px;"><span style="font-size:22px;font-weight:700;color:#19192F;">ShopRoom</span></div>
+        <div style="text-align:center;margin-bottom:24px;"><span style="font-size:22px;font-weight:700;color:#19192F;">CounterCircle</span></div>
         <div style="background:#fff;border-radius:10px;padding:28px;">
           <p style="font-size:16px;color:#19192F;margin:0 0 6px;font-weight:600;">Payment receipt</p>
           <p style="font-size:14px;color:#474554;margin:0 0 20px;">${escapeHtml(greeting)} thank you, we received your payment.</p>
@@ -142,7 +142,7 @@ export async function sendPaymentReceiptEmail(to: string, receipt: PaymentReceip
   await getTransporter().sendMail({
     from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
     to,
-    subject: `Your ShopRoom payment receipt (${formatRupees(receipt.amount)})`,
+    subject: `Your CounterCircle payment receipt (${formatRupees(receipt.amount)})`,
     text,
     html,
   });
@@ -153,14 +153,14 @@ export async function sendNewsletterWelcomeEmail(to: string, unsubscribeUrl: str
   await getTransporter().sendMail({
     from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
     to,
-    subject: "You're subscribed to ShopRoom updates",
+    subject: "You're subscribed to CounterCircle updates",
     headers: { "List-Unsubscribe": `<${unsubscribeUrl}>` },
-    text: `Thanks for subscribing to ShopRoom updates.\n\nIf this wasn't you, or you've changed your mind, unsubscribe here: ${unsubscribeUrl}\n\nWe only email you when there is news worth sharing.`,
+    text: `Thanks for subscribing to CounterCircle updates.\n\nIf this wasn't you, or you've changed your mind, unsubscribe here: ${unsubscribeUrl}\n\nWe only email you when there is news worth sharing.`,
     html: `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#F5F2FF;border-radius:12px;">
-        <div style="text-align:center;margin-bottom:24px;"><span style="font-size:22px;font-weight:700;color:#19192F;">ShopRoom</span></div>
+        <div style="text-align:center;margin-bottom:24px;"><span style="font-size:22px;font-weight:700;color:#19192F;">CounterCircle</span></div>
         <div style="background:#fff;border-radius:10px;padding:32px;text-align:center;">
-          <p style="font-size:16px;color:#474554;margin:0 0 12px;">Thanks for subscribing to ShopRoom updates.</p>
+          <p style="font-size:16px;color:#474554;margin:0 0 12px;">Thanks for subscribing to CounterCircle updates.</p>
           <p style="font-size:13px;color:#474554;margin:0;">We only email you when there is news worth sharing.</p>
         </div>
         <p style="font-size:11px;color:#474554;text-align:center;margin-top:16px;opacity:0.7;">

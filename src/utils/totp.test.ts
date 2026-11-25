@@ -69,6 +69,6 @@ describe("secrets and links", () => {
 
   it("builds the link authenticator apps open", () => {
     const url = otpauthUrl("JBSWY3DPEHPK3PXP", "asha@example.test");
-    assert.equal(url, "otpauth://totp/ShopRoom%3Aasha%40example.test?secret=JBSWY3DPEHPK3PXP&issuer=ShopRoom&algorithm=SHA1&digits=6&period=30");
+    assert.equal(url, "otpauth://totp/CounterCircle%3Aasha%40example.test?secret=JBSWY3DPEHPK3PXP&issuer=CounterCircle&algorithm=SHA1&digits=6&period=30");
   });
 });

@@ -1,5 +1,5 @@
 /**
- * prisma/notificationTemplates.ts — ShopRoom starter templates as v2 composition
+ * prisma/notificationTemplates.ts — CounterCircle starter templates as v2 composition
  * trees.
  *
  * SCOPE: a template is the notification's BIG-PICTURE IMAGE — nothing else.
@@ -434,7 +434,7 @@ export function buildTemplate(spec: TemplateSpec) {
   return NotificationDesignSchema.parse(design);
 }
 
-// ── The ShopRoom starter templates ───────────────────────────────────────────────
+// ── The CounterCircle starter templates ───────────────────────────────────────────────
 
 const SPECS: TemplateSpec[] = [
   { slug: "new-arrival-classic", name: "New Arrival Classic", category: "NEW_ARRIVAL", categorySlug: "new-arrival", theme: "purple", motif: "botanical", badge: "New Arrival", badgeIcon: "AutoAwesome", heading: "New Arrival!", subheading: "Fresh collection just landed in store.", hero: { kind: "product" }, cta: "Shop Now" },
@@ -444,7 +444,7 @@ const SPECS: TemplateSpec[] = [
   { slug: "big-sale", name: "Big Sale", category: "SALE", categorySlug: "sale", theme: "rose", motif: "sale", badge: "Sale", badgeIcon: "Sell", heading: "Big Sale Is On", subheading: "Great deals across your favourite picks.", hero: { kind: "offer", percent: "50%" }, cta: "Shop Sale" },
   { slug: "flash-sale", name: "Flash Sale", category: "FLASH_SALE", categorySlug: "flash-sale", theme: "red", motif: "flash", badge: "Flash Sale", badgeIcon: "FlashOn", heading: "Flash Sale!", subheading: "Ends tonight — grab it before time runs out.", hero: { kind: "offer", percent: "70%" }, cta: "Shop Now" },
   { slug: "special-offer", name: "Special Offer", category: "OFFER", categorySlug: "offer", theme: "orange", motif: "gift", badge: "Special Offer", badgeIcon: "LocalOffer", heading: "Just For You", subheading: "An exclusive offer, reserved for you.", hero: { kind: "icon", icon: "CardGiftcard" }, cta: "Claim Offer" },
-  { slug: "upcoming-event", name: "Upcoming Event", category: "EVENT", categorySlug: "event", theme: "amber", motif: "event", badge: "Event", badgeIcon: "Event", heading: "You're Invited", subheading: "25 May, 6:00 PM — live on ShopRoom.", hero: { kind: "icon", icon: "Celebration" }, cta: "Join Event" },
+  { slug: "upcoming-event", name: "Upcoming Event", category: "EVENT", categorySlug: "event", theme: "amber", motif: "event", badge: "Event", badgeIcon: "Event", heading: "You're Invited", subheading: "25 May, 6:00 PM — live on CounterCircle.", hero: { kind: "icon", icon: "Celebration" }, cta: "Join Event" },
   { slug: "important-announcement", name: "Important Announcement", category: "ANNOUNCEMENT", categorySlug: "announcement", theme: "sand", motif: "announce", badge: "Announcement", badgeIcon: "Campaign", heading: "A Quick Update", subheading: "Something important from your shop.", hero: { kind: "icon", icon: "Notifications" }, cta: "Read More" },
   { slug: "cart-reminder", name: "Cart Reminder", category: "REMINDER", categorySlug: "reminder", theme: "lime", motif: "reminder", badge: "Reminder", badgeIcon: "Notifications", heading: "Still Waiting", subheading: "You left something in your cart.", hero: { kind: "icon", icon: "Assignment" }, cta: "View Cart" },
   { slug: "custom-blank", name: "Your Message", category: "CUSTOM", categorySlug: "custom", theme: "green", motif: "custom", badge: "Custom", badgeIcon: "Tune", heading: "Your Message", subheading: "Design it your way. Say it your way.", hero: { kind: "upload" }, cta: "Customise" },

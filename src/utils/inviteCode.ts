@@ -59,7 +59,7 @@ export async function generateUniqueInviteCode(tx: TxClient): Promise<string> {
  * Builds the shareable invite URL.
  *
  * @param code       — The 8-char invite code.
- * @param baseUrl    — e.g. "https://shoproom.com". Defaults to env var or localhost.
+ * @param baseUrl    — e.g. "https://countercircle.com". Defaults to env var or localhost.
  */
 export function buildInviteLink(code: string, baseUrl?: string): string {
   const base =

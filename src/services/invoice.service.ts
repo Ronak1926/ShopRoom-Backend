@@ -68,7 +68,7 @@ async function issue(tx: Prisma.TransactionClient, seller: InvoiceSeller, paymen
     },
     placeOfSupplyCode: buyerStateCode,
     placeOfSupplyName: buyerStateCode ? stateNameFromCode(buyerStateCode) : null,
-    description: `ShopRoom ${label}`,
+    description: `CounterCircle ${label}`,
     sac: seller.sac,
     ratePercent: seller.ratePercent,
     tax,

@@ -1,14 +1,14 @@
 # Alert rules for Prometheus. Metric names are documented in OBSERVABILITY.md.
 # Adjust thresholds to real traffic after a few weeks of data.
 groups:
-  - name: shoproom-api
+  - name: countercircle-api
     rules:
       - alert: ApiDown
-        expr: up{job="shoproom-api"} == 0
+        expr: up{job="countercircle-api"} == 0
         for: 2m
         labels: { severity: page }
         annotations:
-          summary: "ShopRoom API is not answering scrapes"
+          summary: "CounterCircle API is not answering scrapes"
           runbook: "docs/ops/RUNBOOK.md#api-is-down"
 
       - alert: HighServerErrorRate
@@ -30,7 +30,7 @@ groups:
         annotations:
           summary: "API p95 latency above 1 second"
 
-  - name: shoproom-money-and-trust
+  - name: countercircle-money-and-trust
     rules:
       - alert: PaymentVerificationFailing
         expr: increase(payment_verifications_total{outcome="failure"}[10m]) >= 3

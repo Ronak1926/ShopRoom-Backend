@@ -56,12 +56,12 @@ describe("downloading your data", { skip: !enabled }, () => {
       const c = await customerWithHistory();
       const res = await exportCustomer(c.token);
       assert.equal(res.status, 200, JSON.stringify(res.json));
-      assert.match(res.headers.get("content-disposition") ?? "", /^attachment; filename="shoproom-customer-data-\d{4}-\d{2}-\d{2}\.json"$/);
+      assert.match(res.headers.get("content-disposition") ?? "", /^attachment; filename="countercircle-customer-data-\d{4}-\d{2}-\d{2}\.json"$/);
       assert.equal(res.headers.get("cache-control"), "no-store");
       assert.match(res.headers.get("content-type") ?? "", /^application\/json/);
 
       const data = res.json;
-      assert.equal(data.format, "shoproom-customer-export-v1");
+      assert.equal(data.format, "countercircle-customer-export-v1");
       assert.equal(data.account.fullName, "Asha Rao");
       assert.deepEqual(data.account.signInMethods, ["password", "google"]);
       assert.deepEqual([data.location.sharingEnabled, data.location.latitude, data.location.longitude], [true, 19.07, 72.87]);
@@ -163,7 +163,7 @@ describe("downloading your data", { skip: !enabled }, () => {
       const s = await shopWithHistory();
       const res = await exportShop(s.token);
       assert.equal(res.status, 200, JSON.stringify(res.json));
-      assert.match(res.headers.get("content-disposition") ?? "", /^attachment; filename="shoproom-shopkeeper-data-/);
+      assert.match(res.headers.get("content-disposition") ?? "", /^attachment; filename="countercircle-shopkeeper-data-/);
       assert.equal(res.headers.get("cache-control"), "no-store");
       const data = res.json;
       assert.equal(data.account.ownerName, "Ravi Shah");

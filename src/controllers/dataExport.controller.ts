@@ -25,7 +25,7 @@ function sendAsDownload(res: Response, kind: "customer" | "shopkeeper", data: un
   const day = new Date().toISOString().slice(0, 10);
   res.set({
     "Content-Type": "application/json; charset=utf-8",
-    "Content-Disposition": `attachment; filename="shoproom-${kind}-data-${day}.json"`,
+    "Content-Disposition": `attachment; filename="countercircle-${kind}-data-${day}.json"`,
     // Personal data: never kept by a browser cache or a shared proxy.
     "Cache-Control": "no-store",
   });

@@ -9,7 +9,7 @@
 #                          pnpm exec prisma migrate deploy
 # The image keeps the Prisma CLI for that reason.
 
-FROM node:24-slim AS build
+FROM node:25-slim AS build
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -22,7 +22,7 @@ COPY src ./src
 ARG DATABASE_URL=postgresql://build:build@localhost:5432/build
 RUN pnpm exec prisma generate && pnpm build
 
-FROM node:24-slim AS runtime
+FROM node:25-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 RUN corepack enable

@@ -38,7 +38,7 @@ jobs:
     outputs:
       name: ${{ steps.meta.outputs.name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: meta
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/countercircle-backend" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3

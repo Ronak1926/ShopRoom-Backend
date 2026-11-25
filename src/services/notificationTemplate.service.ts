@@ -10,6 +10,7 @@ import { NotificationError } from "../utils/notificationError.js";
 import { cloneDesignJson, toJsonInput } from "../utils/notificationDesign.js";
 import { validateDesign } from "./notificationValidation.service.js";
 import { meetsRequiredPlan } from "./notificationPlan.service.js";
+import { personaliseTemplate } from "../utils/personaliseTemplate.js";
 
 export interface ListTemplatesOptions {
   categoryId?: string;
@@ -102,11 +103,12 @@ export async function useTemplate(shopkeeperId: string, templateId: string) {
         designJson: true,
         schemaVersion: true,
         requiredPlan: true,
+        sampleShopName: true,
       },
     }),
     prisma.shopkeeper.findUnique({
       where: { id: shopkeeperId },
-      select: { planType: true },
+      select: { planType: true, shop: { select: { shopName: true } } },
     }),
   ]);
 
@@ -136,7 +138,8 @@ export async function useTemplate(shopkeeperId: string, templateId: string) {
       select: { id: true },
     });
 
-    const cloned = cloneDesignJson(validated.data, {
+    const personalised = personaliseTemplate(validated.data, template.sampleShopName, shopkeeper?.shop?.shopName);
+    const cloned = cloneDesignJson(personalised, {
       id: created.id,
       name: template.name,
       source: "SHOPROOM_TEMPLATE",

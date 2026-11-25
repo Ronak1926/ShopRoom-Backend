@@ -21,6 +21,7 @@ import {
 import { INK, WHITE, BRAND, type Design } from "./templates/kit.js";
 import * as L from "./templates/layouts.js";
 import { GENERATED } from "./templates/generated.js";
+import { SHOP_TYPES } from "./templates/shopTypes.js";
 
 const CATEGORY_TYPES: Record<string, NotificationType> = {
   "new-arrival": "NEW_ARRIVAL",
@@ -219,18 +220,65 @@ function buildTemplate(entry: Entry) {
   });
 }
 
-/** Hand-written showcase templates first (they sort first), then the generated set. */
+// ── Plans ─────────────────────────────────────────────────────────────────────
+//
+// 1 Month gets two templates per shop type (a hero banner and a discount),
+// 2 Months adds four more per shop type (price sticker, back in stock, event,
+// announcement), and 3 Months unlocks the whole catalog. Templates are listed
+// in that order, so every shopkeeper sees what their plan includes first.
+
+const ONE_MONTH_LAYOUTS = ["hero-1", "burst-1"];
+const TWO_MONTH_LAYOUTS = ["sticker-1", "back-in-stock-1", "event-1", "announcement-1"];
+
+const GENERATED_SLUGS = new Set(GENERATED.map((g) => g.slug));
+const SAMPLE_SHOP = new Map(GENERATED.map((g) => [g.slug, g.sampleShopName]));
+
+/** The layout part of a generated slug ("bakery-hero-1" → "hero-1"). */
+function layoutOf(slug: string): string {
+  const type = SHOP_TYPES.find((s) => slug.startsWith(`${s.key}-`));
+  return type ? slug.slice(type.key.length + 1) : slug;
+}
+
+type RequiredPlan = null | "2m" | "3m";
+function requiredPlanFor(slug: string): RequiredPlan {
+  if (!GENERATED_SLUGS.has(slug)) return "3m";
+  const layout = layoutOf(slug);
+  if (ONE_MONTH_LAYOUTS.includes(layout)) return null;
+  if (TWO_MONTH_LAYOUTS.includes(layout)) return "2m";
+  return "3m";
+}
+const TIER_ORDER = { all: 0, "2m": 1, "3m": 2 } as const;
+
+/** The shop name shown in a design's pill, for the hand-written templates. */
+function pillShopName(elements: unknown[]): string | null {
+  const stack = [...elements] as { id?: string; content?: { text?: string }; children?: unknown[] }[];
+  while (stack.length) {
+    const n = stack.shift()!;
+    if (n.id === "shop-name" && n.content?.text) return n.content.text;
+    stack.push(...((n.children ?? []) as typeof stack));
+  }
+  return null;
+}
+
+/** Hand-written showcase templates and the generated set, ordered by plan (stable within a plan). */
 const ALL: Entry[] = [
   ...CATALOG,
   ...GENERATED.map((g) => {
     if (!(g.categorySlug in CATEGORY_TYPES)) throw new Error(`Unknown category ${g.categorySlug} for ${g.slug}`);
     return t(g.slug, g.name, g.categorySlug as Entry["categorySlug"], g.design);
   }),
-];
+]
+  .map((entry, index) => ({ entry, index, tier: TIER_ORDER[requiredPlanFor(entry.slug) ?? "all"] }))
+  .sort((a, b) => a.tier - b.tier || a.index - b.index)
+  .map(({ entry }) => entry);
 
 export const TEMPLATES = ALL.map((entry) => ({
   slug: entry.slug,
   name: entry.name,
   categorySlug: entry.categorySlug,
+  /** null = every plan; otherwise the lowest plan that unlocks it. */
+  requiredPlan: requiredPlanFor(entry.slug),
+  /** The made-up shop the sample design uses (swapped for the real shop name on use). */
+  sampleShopName: () => SAMPLE_SHOP.get(entry.slug) ?? pillShopName(entry.design().elements),
   build: () => buildTemplate(entry),
 }));

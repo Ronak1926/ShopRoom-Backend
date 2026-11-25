@@ -15,9 +15,9 @@ export interface PlanInfo {
 }
 
 export const PLANS: Record<PlanId, PlanInfo> = {
-  "1m": { id: "1m", label: "1 Month", amount: 39_900, days: 30 },
-  "2m": { id: "2m", label: "2 Months", amount: 59_900, days: 60 },
-  "3m": { id: "3m", label: "3 Months", amount: 89_900, days: 90 },
+  "1m": { id: "1m", label: "1 Month", amount: 49_900, days: 30 },
+  "2m": { id: "2m", label: "2 Months", amount: 89_900, days: 60 },
+  "3m": { id: "3m", label: "3 Months", amount: 119_900, days: 90 },
 };
 
 export const PLAN_IDS = Object.keys(PLANS) as PlanId[];

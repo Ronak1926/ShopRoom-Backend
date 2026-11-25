@@ -110,7 +110,7 @@ describe("plan expiry, billing and renewal", { skip: !enabled }, () => {
       assert.equal(b.planType, "2m");
       assert.equal(b.active, true);
       assert.equal(b.daysLeft, 10);
-      assert.deepEqual(b.plans.map((p: { id: string; priceInr: number }) => [p.id, p.priceInr]), [["1m", 399], ["2m", 599], ["3m", 899]]);
+      assert.deepEqual(b.plans.map((p: { id: string; priceInr: number }) => [p.id, p.priceInr]), [["1m", 499], ["2m", 899], ["3m", 1199]]);
       assert.deepEqual(b.payments, []);
     });
 
@@ -139,7 +139,7 @@ describe("plan expiry, billing and renewal", { skip: !enabled }, () => {
       assert.equal(b.active, true);
       assert.equal(b.daysLeft, 90);
       assert.equal(b.payments[0].purpose, "RENEWAL");
-      assert.equal(b.payments[0].amountInr, 899);
+      assert.equal(b.payments[0].amountInr, 1199);
 
       const sent = await t.call("POST", "/api/notifications/send", { token: s.token, body: sendBody(s.designId) });
       assert.equal(sent.status, 201, JSON.stringify(sent.json));

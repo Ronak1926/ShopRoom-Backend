@@ -7,6 +7,7 @@
 import { prisma } from "../database/prisma.js";
 import { NotificationError } from "../utils/notificationError.js";
 import { isPlanActive } from "./billing.service.js";
+import { audienceViolation } from "./notificationPlan.service.js";
 
 export interface SenderContext {
   roomId: string;
@@ -43,6 +44,12 @@ export async function loadSenderContext(shopkeeperId: string): Promise<SenderCon
 
 export function assertPlanActive(sender: SenderContext): void {
   if (!sender.planActive) throw NotificationError.paymentRequired(PLAN_EXPIRED_MESSAGE);
+}
+
+/** Refuses an audience wider than the plan reaches (room only, 5 km or 10 km). */
+export function assertAudienceAllowed(sender: SenderContext, reachesNearby: boolean, radiusKm: number | null | undefined): void {
+  const violation = audienceViolation(sender.planType, reachesNearby, radiusKm);
+  if (violation) throw NotificationError.forbidden(violation);
 }
 
 export function assertShopHasLocation(sender: SenderContext): void {

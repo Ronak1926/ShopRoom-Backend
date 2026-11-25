@@ -19,7 +19,7 @@ const KEY_SECRET = "test_key_secret_123";
 const WEBHOOK_SECRET = "test_webhook_secret_456";
 const KEY_ID = "rzp_test_abc123XYZ789";
 const SHOP = { shopName: "Sunrise Textiles", shopCategory: "Fashion", address: "12 Market Road", city: "Pune", state: "Maharashtra", pincode: "411001" };
-const PRICE = { "1m": 39_900, "2m": 59_900, "3m": 89_900 } as const;
+const PRICE = { "1m": 49_900, "2m": 89_900, "3m": 119_900 } as const;
 const hmac = (secret: string, payload: string) => createHmac("sha256", secret).update(payload).digest("hex");
 
 /** A stand-in for Razorpay's servers that records what we ask of it and can be told to fail. */
@@ -744,8 +744,8 @@ describe("payments end to end", { skip: !enabled }, () => {
       await settleDown();
       assert.equal(mails.length, 1, "exactly one receipt");
       assert.equal(mails[0].to, o.email);
-      assert.match(mails[0].subject, /599\.00/);
-      for (const part of ["2 Months", "599.00", "pay_Rc1", "Sunrise Textiles"]) assert.ok(mails[0].text.includes(part), `text mentions ${part}`);
+      assert.match(mails[0].subject, /899\.00/);
+      for (const part of ["2 Months", "899.00", "pay_Rc1", "Sunrise Textiles"]) assert.ok(mails[0].text.includes(part), `text mentions ${part}`);
       assert.ok(mails[0].html.includes("pay_Rc1"));
       assert.ok(await receiptSentAt(o.orderId), "the order remembers it was sent");
       assert.equal((await webhook(paidEvent({ orderId: o.orderId, paymentId: "pay_Rc1", amount: o.amount }))).status, 200);
@@ -766,7 +766,7 @@ describe("payments end to end", { skip: !enabled }, () => {
       await waitForMails(1);
       assert.equal(mails.length, 1);
       assert.match(mails[0].text, /renewal, 3 Months plan/);
-      assert.ok(mails[0].text.includes("899.00"));
+      assert.ok(mails[0].text.includes("1,199.00"));
       assert.ok(mails[0].html.includes("Raj &amp; &lt;Sons&gt;"), "escaped in the HTML");
       assert.ok(!mails[0].html.includes("<Sons>"));
     });

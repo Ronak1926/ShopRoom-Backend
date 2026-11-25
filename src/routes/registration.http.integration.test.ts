@@ -175,7 +175,7 @@ describe("shopkeeper registration and payments", { skip: !enabled }, () => {
 
       const ledger = await t.prisma.planPayment.findMany({ where: { shopkeeperId: shopkeeper.id } });
       assert.equal(ledger.length, 1, "registration is the first ledger entry");
-      assert.deepEqual([ledger[0].purpose, ledger[0].planType, ledger[0].amount, ledger[0].razorpayPaymentId], ["REGISTRATION", "3m", 89_900, "pay_ok_1"]);
+      assert.deepEqual([ledger[0].purpose, ledger[0].planType, ledger[0].amount, ledger[0].razorpayPaymentId], ["REGISTRATION", "3m", 119_900, "pay_ok_1"]);
     });
 
     it("rejects a payment made for a different registration", async () => {

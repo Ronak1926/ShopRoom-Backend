@@ -8,7 +8,7 @@ import { prisma } from "../database/prisma.js";
 import { NotificationError } from "../utils/notificationError.js";
 import type { SendNotificationInput } from "../schemas/notificationSendRequest.schema.js";
 import { pinDesignVersion, resolveDesignId } from "./notificationDesignPin.service.js";
-import { assertPlanActive, assertShopHasLocation, loadSenderContext } from "./notificationSender.service.js";
+import { assertAudienceAllowed, assertPlanActive, assertShopHasLocation, loadSenderContext } from "./notificationSender.service.js";
 import { getSendRules } from "./notificationPreferences.service.js";
 import { assertUnderDailyLimit, reserveSend } from "./notificationUsage.service.js";
 import { dispatchSend } from "./notificationDispatch.service.js";
@@ -28,6 +28,7 @@ export async function sendNotification(
   const sender = await loadSenderContext(shopkeeperId);
   assertPlanActive(sender);
   const kind = input.audience.mode;
+  assertAudienceAllowed(sender, usesRadius(kind), input.audience.radiusKm);
   if (usesRadius(kind)) assertShopHasLocation(sender);
 
   await assertUnderDailyLimit(shopkeeperId, sender.planType);

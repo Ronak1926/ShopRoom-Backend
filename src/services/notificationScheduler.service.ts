@@ -20,6 +20,7 @@ import { nextRunAfter } from "../utils/scheduleRecurrence.js";
 import { kindFromLegs, usesRadius } from "./notificationAudience.service.js";
 import { dispatchSend } from "./notificationDispatch.service.js";
 import { isPlanActive } from "./billing.service.js";
+import { getPlanCapabilities } from "./notificationPlan.service.js";
 import { getSendRules } from "./notificationPreferences.service.js";
 import { blockedBy, type BlockReason } from "../utils/quietHours.js";
 import { specFromSchedule } from "./notificationSchedule.service.js";
@@ -126,14 +127,20 @@ async function runSchedule(scheduleId: string): Promise<void> {
   const rules = await getSendRules(schedule.shopkeeperId);
   let blocked: BlockReason | null = null;
   const missed = now.getTime() - occurrence.getTime() > MISSED_GRACE_MS;
-  const kind = kindFromLegs(schedule.includeMembers, schedule.includeNearby);
+  // The plan may have changed since the schedule was made, so its reach is
+  // fitted to the plan as it is now: the radius is capped, and a plan without
+  // nearby reach sends to members only (a nearby-only series is skipped).
+  const maxRadiusKm = getPlanCapabilities(schedule.shopkeeper.planType).maxRadiusKm;
+  const includeNearby = schedule.includeNearby && maxRadiusKm > 0;
+  const outOfPlan = schedule.includeNearby && !includeNearby && !schedule.includeMembers;
+  const kind = kindFromLegs(schedule.includeMembers || outOfPlan, includeNearby);
 
   const send: NewSend = {
     shopkeeperId: schedule.shopkeeperId,
     roomId: schedule.roomId,
     designVersionId: schedule.designVersionId,
     audience: kind,
-    radiusKm: usesRadius(kind) ? schedule.radiusKm : null,
+    radiusKm: usesRadius(kind) ? Math.min(schedule.radiusKm, maxRadiusKm) : null,
     message: schedule.message,
     scheduleId: schedule.id,
     scheduledFor: occurrence,
@@ -146,6 +153,9 @@ async function runSchedule(scheduleId: string): Promise<void> {
     // The series carries on; its occurrences resume sending once the plan is renewed.
     schedulerRuns.inc({ result: "plan_expired" });
     await recordFailedSend(send, "PLAN_EXPIRED");
+  } else if (outOfPlan) {
+    schedulerRuns.inc({ result: "plan_audience" });
+    await recordFailedSend(send, "PLAN_AUDIENCE");
   } else if ((blocked = blockedBy(rules, occurrence, schedule.timeZone))) {
     // Rules can change after a schedule was made (or a recurrence can land on a weekend): skip, don't send.
     schedulerRuns.inc({ result: blocked === "QUIET_HOURS" ? "quiet_hours" : "weekend_blocked" });

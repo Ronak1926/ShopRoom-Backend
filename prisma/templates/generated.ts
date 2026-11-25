@@ -10,6 +10,7 @@
  */
 
 import { WHITE, type Design, type Item } from "./kit.js";
+import { compactShopName } from "../../src/utils/personaliseTemplate.js";
 import * as L from "./layouts.js";
 import { SHOP_TYPES, type Palette, type Product, type ShopKind, type ShopType } from "./shopTypes.js";
 
@@ -17,6 +18,8 @@ export interface GeneratedTemplate {
   slug: string;
   name: string;
   categorySlug: string;
+  /** The made-up shop the sample uses; swapped for the real shop name on use. */
+  sampleShopName: string;
   design: () => Design;
 }
 
@@ -44,16 +47,6 @@ function bright(hex: string, amount = 0.45): string {
 
 const item = (p: Product): Item => ({ photo: p.photo, name: p.short, price: inr(p.price) });
 const fits = (p: Product, max: number) => (p.name.length <= max ? p.name : p.short);
-/** Shop name for small uppercase labels: the first words that fit in 15 characters. */
-function compact(shop: string): string {
-  const words = shop.split(" ");
-  let out = words[0];
-  for (const w of words.slice(1)) {
-    if (`${out} ${w}`.length > 15) break;
-    out = `${out} ${w}`;
-  }
-  return out;
-}
 const DISCOUNTS = [20, 30, 40, 25, 35, 50];
 const SIZES: Partial<Record<string, string[]>> = {
   "womens-fashion": ["XS", "S", "M", "L", "XL"],
@@ -118,15 +111,15 @@ const ADAPTERS: Adapter[] = [
     return L.burst({ shop, discount: `${pct}%`, name: fits(p, 14), price: inr(p.price), mrp: inr(mrpFor(p.price, pct)), photo: p.photo, bg: pal.light, burst: pal.accent });
   } },
   { key: "pair", label: "Two Products", categorySlug: "new-stock", min: 2, multi: true, build: ({ type, shop, pal, pick }) =>
-    L.pair({ label: compact(shop), title: type.newLabel, cta: type.cta, items: [item(pick(0)), item(pick(1))], bg: pal.light, ink: pal.tint, serif: true }) },
+    L.pair({ label: compactShopName(shop), title: type.newLabel, cta: type.cta, items: [item(pick(0)), item(pick(1))], bg: pal.light, ink: pal.tint, serif: true }) },
   { key: "grid", label: "Three Products", categorySlug: "new-arrival", min: 3, multi: true, build: ({ type, pal, pick }) =>
     L.grid({ title: type.newLabel, link: "See all →", items: [item(pick(0)), item(pick(1)), item(pick(2))], bg: pal.tint, linkColor: bright(pal.accent, 0.55) }) },
   { key: "four", label: "Four Products", categorySlug: "new-stock", min: 4, maxPrice: 9999, multi: true, build: ({ type, shop, v, pal, pick }) =>
-    L.fourGrid({ label: compact(shop), title: type.newLabel, info: `${type.products.length} picks in store`, cta: type.cta, items: [item(pick(0)), item(pick(1)), item(pick(2)), item(pick(3))], bg: v === 0 ? pal.light : pal.tint, ink: v === 0 ? pal.tint : WHITE }) },
+    L.fourGrid({ label: compactShopName(shop), title: type.newLabel, info: `${type.products.length} picks in store`, cta: type.cta, items: [item(pick(0)), item(pick(1)), item(pick(2)), item(pick(3))], bg: v === 0 ? pal.light : pal.tint, ink: v === 0 ? pal.tint : WHITE }) },
   { key: "collection", label: "Collection", categorySlug: "new-arrival", min: 4, maxPrice: 9999, multi: true, build: ({ type, shop, pal, pick }) => {
     const items = [pick(0), pick(1), pick(2), pick(3)];
     const from = Math.min(...items.map((p) => p.price));
-    return L.collection({ label: compact(shop), name: type.label, info: `${type.products.length} items · from ${inr(from)}`, cta: type.cta, items: [item(items[0]), item(items[1]), item(items[2]), item(items[3])], bg: pal.tint, serif: true });
+    return L.collection({ label: compactShopName(shop), name: type.label, info: `${type.products.length} items · from ${inr(from)}`, cta: type.cta, items: [item(items[0]), item(items[1]), item(items[2]), item(items[3])], bg: pal.tint, serif: true });
   } },
   { key: "combo", label: "Combo Deal", categorySlug: "offer", min: 2, multi: true, build: ({ shop, pal, pick }) => {
     const [a, b] = [pick(0), pick(1)];
@@ -134,7 +127,7 @@ const ADAPTERS: Adapter[] = [
     return L.combo({ label: `${shop} · Combo`, photos: [a.photo, b.photo], comboName: `${a.short} + ${b.short}`, priceLabel: "Both for", price: inr(total), saving: `Save ${inr(a.price + b.price - total)}`, cta: "Get the combo", from: pal.accent, to: pal.tint, soft: pal.light });
   } },
   { key: "rate-card", label: "Rate Card", categorySlug: "new-stock", min: 4, kinds: ["fresh", "grocery"], multi: true, build: ({ type, shop, pal, pick }) =>
-    L.rateCard({ label: "Today's rates", name: compact(shop), rows: [0, 1, 2, 3].map((i) => { const p = pick(i); return [p.short, inr(p.price), `/${p.unit ?? "pc"}`]; }), tag: type.newLabel, photo: type.scene, bg: pal.tint, accent: bright(pal.accent, 0.55) }) },
+    L.rateCard({ label: "Today's rates", name: compactShopName(shop), rows: [0, 1, 2, 3].map((i) => { const p = pick(i); return [p.short, inr(p.price), `/${p.unit ?? "pc"}`]; }), tag: type.newLabel, photo: type.scene, bg: pal.tint, accent: bright(pal.accent, 0.55) }) },
   { key: "quantity", label: "Quantity Prices", categorySlug: "offer", kinds: ["fresh", "grocery"], build: ({ shop, pal, pick }) => {
     const p = pick();
     const unit = p.unit && !/^\d/.test(p.unit) ? p.unit : "pack";
@@ -142,7 +135,7 @@ const ADAPTERS: Adapter[] = [
   } },
   { key: "menu", label: "Menu Card", categorySlug: "custom", min: 3, kinds: ["food"], multi: true, build: ({ type, shop, pal, pick }) => {
     const dishes = [pick(0), pick(1), pick(2)];
-    return L.menuCard({ label: compact(shop), title: `Today's ${type.label === "Café" ? "Menu" : "Specials"}`, dishes: dishes.map((p) => [p.short, inr(p.price)]), photo: dishes[0].photo, bg: pal.tint, accent: bright(pal.accent, 0.4) });
+    return L.menuCard({ label: compactShopName(shop), title: `Today's ${type.label === "Café" ? "Menu" : "Specials"}`, dishes: dishes.map((p) => [p.short, inr(p.price)]), photo: dishes[0].photo, bg: pal.tint, accent: bright(pal.accent, 0.4) });
   } },
   { key: "sizes", label: "Portion Sizes", categorySlug: "custom", kinds: ["food"], build: ({ type, shop, pal, pick }) => {
     const p = pick();
@@ -239,6 +232,7 @@ export const GENERATED: GeneratedTemplate[] = SHOP_TYPES.flatMap((type) =>
         slug: `${type.key}-${adapter.key}-${v + 1}`,
         name: `${type.label} · ${adapter.label} · ${subject}`,
         categorySlug: adapter.categorySlug,
+        sampleShopName: type.shops[v],
         design: () => adapter.build(ctx),
       };
     });

@@ -11,7 +11,7 @@ import { NotificationError } from "../utils/notificationError.js";
 import { nextRunAfter, type RecurrenceSpec } from "../utils/scheduleRecurrence.js";
 import type { CreateScheduleInput } from "../schemas/notificationScheduleRequest.schema.js";
 import { pinDesignVersion, resolveDesignId } from "./notificationDesignPin.service.js";
-import { assertPlanActive, assertShopHasLocation, loadSenderContext } from "./notificationSender.service.js";
+import { assertAudienceAllowed, assertPlanActive, assertShopHasLocation, loadSenderContext } from "./notificationSender.service.js";
 import { getSendRules } from "./notificationPreferences.service.js";
 import { BLOCK_MESSAGES, blockedBy } from "../utils/quietHours.js";
 
@@ -113,6 +113,7 @@ export async function createSchedule(
   const { audience, schedule } = input;
   const sender = await loadSenderContext(shopkeeperId);
   assertPlanActive(sender);
+  assertAudienceAllowed(sender, audience.includeNearby, audience.radiusKm);
   if (audience.includeNearby) assertShopHasLocation(sender);
 
   // Occurrences live on the wall clock at minute precision.

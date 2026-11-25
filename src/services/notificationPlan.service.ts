@@ -17,6 +17,11 @@ export type NotificationFeature =
 
 export interface PlanCapabilities {
   dailyNotificationLimit: number;
+  /**
+   * How far beyond the room a send may reach, in km. 0 means room members
+   * only: no customers selected by distance at all.
+   */
+  maxRadiusKm: number;
   CUSTOM_TEMPLATE: boolean;
   ADVANCED_TEMPLATE_EDITING: boolean;
   CUSTOM_ANIMATION: boolean;
@@ -27,18 +32,21 @@ const PLAN_RANK: Record<PlanType, number> = { "1m": 1, "2m": 2, "3m": 3 };
 const CAPABILITIES: Record<PlanType, PlanCapabilities> = {
   "1m": {
     dailyNotificationLimit: 1,
+    maxRadiusKm: 0,
     CUSTOM_TEMPLATE: false,
     ADVANCED_TEMPLATE_EDITING: false,
     CUSTOM_ANIMATION: false,
   },
   "2m": {
     dailyNotificationLimit: 2,
+    maxRadiusKm: 5,
     CUSTOM_TEMPLATE: true,
     ADVANCED_TEMPLATE_EDITING: true,
     CUSTOM_ANIMATION: false,
   },
   "3m": {
     dailyNotificationLimit: 4,
+    maxRadiusKm: 10,
     CUSTOM_TEMPLATE: true,
     ADVANCED_TEMPLATE_EDITING: true,
     CUSTOM_ANIMATION: true,
@@ -83,4 +91,25 @@ export function meetsRequiredPlan(
   const required = PLAN_RANK[requiredPlan as PlanType];
   if (!required) return true;
   return PLAN_RANK[normalizePlan(planType)] >= required;
+}
+
+/**
+ * Why an audience is outside what the plan allows, or null when it is fine.
+ * `reachesNearby` is whether the send goes beyond room members to anyone
+ * selected by distance (every audience kind except ROOM_MEMBERS).
+ */
+export function audienceViolation(
+  planType: string | null | undefined,
+  reachesNearby: boolean,
+  radiusKm: number | null | undefined,
+): string | null {
+  if (!reachesNearby) return null;
+  const max = getPlanCapabilities(planType).maxRadiusKm;
+  if (max === 0) {
+    return "Your 1 Month plan sends to your room members only. Upgrade to reach customers nearby.";
+  }
+  if (!radiusKm || radiusKm > max) {
+    return `Your plan reaches customers up to ${max} km away. Choose ${max} km or less, or upgrade for a wider reach.`;
+  }
+  return null;
 }

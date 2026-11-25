@@ -520,19 +520,21 @@ model NotificationCategory {
 
 /// CounterCircle-provided starting design. Cloned into a shopkeeper-owned design.
 model NotificationTemplate {
-  id            String               @id @default(cuid())
-  slug          String               @unique
-  name          String
-  categoryId    String
-  category      NotificationCategory @relation(fields: [categoryId], references: [id])
-  designJson    Json
-  thumbnailUrl  String?
-  schemaVersion Int                  @default(1)
-  requiredPlan  String? // null = available on every plan; else "1m" | "2m" | "3m"
-  isActive      Boolean              @default(true)
-  sortOrder     Int                  @default(0)
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
+  id             String               @id @default(cuid())
+  slug           String               @unique
+  name           String
+  categoryId     String
+  category       NotificationCategory @relation(fields: [categoryId], references: [id])
+  designJson     Json
+  thumbnailUrl   String?
+  schemaVersion  Int                  @default(1)
+  requiredPlan   String? // null = available on every plan; else "1m" | "2m" | "3m"
+  /// The made-up shop name the sample design uses; replaced with the real shop's name when a shopkeeper uses the template.
+  sampleShopName String?
+  isActive       Boolean              @default(true)
+  sortOrder      Int                  @default(0)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
 
   designs NotificationDesign[]
 

@@ -14,6 +14,12 @@ import {
   toJsonInput,
 } from "../utils/notificationDesign.js";
 import { validateDesign } from "./notificationValidation.service.js";
+import { getShopkeeperPlan, hasFeature } from "./notificationPlan.service.js";
+import {
+  QUICK_EDIT_MESSAGE,
+  animationEditViolation,
+  quickEditViolation,
+} from "../utils/designEditRules.js";
 import type {
   NotificationDesign,
   NotificationType,
@@ -54,11 +60,34 @@ async function assertOwned(shopkeeperId: string, id: string): Promise<void> {
   if (!owned) throw NotificationError.notFound("Design not found");
 }
 
+/**
+ * Refuses a save the plan doesn't allow: quick edit only on 1 Month, and no
+ * animation changes without custom animation (see utils/designEditRules.ts).
+ */
+function assertEditAllowed(planType: string | null, storedJson: unknown, next: NotificationDesign): void {
+  const fullEditor = hasFeature(planType, "ADVANCED_TEMPLATE_EDITING");
+  const customAnimation = hasFeature(planType, "CUSTOM_ANIMATION");
+  if (fullEditor && customAnimation) return;
+  const prev = validateDesign(storedJson);
+  // A stored design that no longer parses can't be compared, so only a plan
+  // with every editing feature may overwrite it.
+  if (!prev.valid) throw NotificationError.forbidden(QUICK_EDIT_MESSAGE);
+  const violation = !fullEditor
+    ? quickEditViolation(prev.data, next)
+    : animationEditViolation(prev.data, next);
+  if (violation) throw NotificationError.forbidden(violation);
+}
+
 export async function createBlankDesign(
   shopkeeperId: string,
   name: string,
   category: NotificationType,
 ) {
+  if (!hasFeature(await getShopkeeperPlan(shopkeeperId), "CUSTOM_TEMPLATE")) {
+    throw NotificationError.forbidden(
+      "Designing from a blank canvas is part of the 2 Months plan. On 1 Month, start from a template.",
+    );
+  }
   const categoryId = await resolveCategoryId(category);
 
   return prisma.$transaction(async (tx) => {
@@ -160,7 +189,12 @@ export async function autosaveDesign(
   id: string,
   input: AutosaveInput,
 ) {
-  await assertOwned(shopkeeperId, id);
+  const [stored, planType] = await Promise.all([
+    prisma.notificationDesign.findFirst({ where: { id, shopkeeperId }, select: { designJson: true } }),
+    getShopkeeperPlan(shopkeeperId),
+  ]);
+  if (!stored) throw NotificationError.notFound("Design not found");
+  if (input.design) assertEditAllowed(planType, stored.designJson, input.design);
 
   const data: Record<string, unknown> = {};
   if (input.name !== undefined) data.name = input.name;

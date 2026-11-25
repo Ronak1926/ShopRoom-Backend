@@ -82,10 +82,11 @@ export async function seedNotifications(prisma: PrismaClient): Promise<void> {
     const categoryId = categoryIdBySlug.get(t.categorySlug);
     if (!categoryId) continue;
     const designJson = toJsonInput(t.build());
+    const fields = { name: t.name, categoryId, designJson, schemaVersion: 2, sortOrder: i, requiredPlan: t.requiredPlan, sampleShopName: t.sampleShopName() };
     await prisma.notificationTemplate.upsert({
       where: { slug: t.slug },
-      update: { name: t.name, categoryId, designJson, schemaVersion: 2, sortOrder: i, isActive: true },
-      create: { slug: t.slug, name: t.name, categoryId, designJson, schemaVersion: 2, sortOrder: i },
+      update: { ...fields, isActive: true },
+      create: { slug: t.slug, ...fields },
     });
     activeSlugs.push(t.slug);
   }

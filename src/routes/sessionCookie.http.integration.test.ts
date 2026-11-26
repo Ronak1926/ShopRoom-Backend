@@ -167,6 +167,18 @@ describe("browser sessions in HttpOnly cookies", { skip: !enabled }, () => {
     });
   });
 
+  describe("signing out from another site", () => {
+    it("refuses a forged sign-out that carries a session cookie, and still signs out from the web app", async () => {
+      process.env.CORS_ORIGINS = APP;
+      const forged = await t.call("POST", "/api/customers/logout", withCookie("sr_customer", "any-value", { ...COOKIE_MODE, Origin: "https://evil.example.test" }));
+      assert.equal(forged.status, 403);
+      assert.equal(sessionCookie(forged.headers, "sr_customer"), undefined, "the cookie must not be cleared");
+      const own = await t.call("POST", "/api/customers/logout", withCookie("sr_customer", "any-value", { ...COOKIE_MODE, Origin: APP }));
+      assert.equal(own.status, 200);
+      assert.ok(sessionCookie(own.headers, "sr_customer")?.includes("Max-Age=0"));
+    });
+  });
+
   describe("requests another site could have started", () => {
     // Like the web app, which sends the session-mode header on every request.
     const write = (cookie: string, headers: Record<string, string>) =>

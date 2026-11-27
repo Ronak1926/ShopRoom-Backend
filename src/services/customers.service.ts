@@ -2,6 +2,8 @@ import { Prisma } from "../generated/client.js";
 import { prisma } from "../database/prisma.js";
 import { hashPassword, needsRehash, verifyPassword } from "../utils/password.js";
 import { forgetSession } from "./session.service.js";
+import { verifyEmailOtp } from "./otp.service.js";
+import { verifyEmailVerifyToken } from "../utils/jwt.js";
 
 export type CustomerSafe = {
   id: string;
@@ -138,6 +140,27 @@ export async function reportCustomerLocation(
     data: { ...position, locationUpdatedAt: new Date() },
   });
   return result.count === 1;
+}
+
+/**
+ * The last step of confirming an email: the caller holds the verification token (they know the password) and the
+ * code emailed to the address (they own the mailbox). Both are needed, so neither a stranger who typed someone
+ * else's address into the sign-up form, nor someone who only reads that mailbox, can start a session.
+ */
+export async function confirmEmailAndSignIn(input: { email: string; code: string; verificationToken: string }) {
+  let payload;
+  try {
+    payload = verifyEmailVerifyToken(input.verificationToken);
+  } catch {
+    return { ok: false as const, reason: "VERIFICATION_EXPIRED" as const };
+  }
+  const customer = await prisma.customer.findUnique({ where: { id: payload.sub } });
+  if (!customer || customer.email !== input.email || customer.tokenVersion !== payload.tv) {
+    return { ok: false as const, reason: "VERIFICATION_EXPIRED" as const };
+  }
+  const code = await verifyEmailOtp(input.email, input.code);
+  if (!code.ok) return { ok: false as const, reason: "INVALID_CODE" as const };
+  return { ok: true as const, customer: toSafeCustomer(customer), tokenVersion: customer.tokenVersion };
 }
 
 export async function getCustomerById(id: string) {

@@ -308,6 +308,106 @@ describe("shopkeeper registration and payments", { skip: !enabled }, () => {
       assert.equal(typeof allowed.json.token, "string");
     });
 
+    describe("confirming the email signs the person in", () => {
+      const PASSWORD = "correct-horse-1";
+      const register = async (email: string) => {
+        const res = await t.call("POST", "/api/customers/register", { body: { fullName: "Otp User", email, password: PASSWORD } });
+        assert.equal(res.status, 200, JSON.stringify(res.json));
+        assert.equal(typeof res.json.verificationToken, "string", "sign-up hands out the verification token");
+        return res.json as { customerId: string; verificationToken: string };
+      };
+      const confirm = (body: Record<string, unknown>, headers?: Record<string, string>) => t.call("POST", "/api/customers/verify-email", { body, headers });
+
+      it("starts a session only when the code and the verification token are both right", async () => {
+        const email = uniqueEmail();
+        const { customerId, verificationToken } = await register(email);
+        const code = await sendCode(email);
+
+        const noToken = await confirm({ email, code });
+        assert.equal(noToken.status, 400);
+        assert.equal(noToken.json.token, undefined);
+
+        const wrongCode = await confirm({ email, code: code === "000000" ? "111111" : "000000", verificationToken });
+        assert.equal(wrongCode.status, 400);
+        assert.equal(wrongCode.json.token, undefined);
+        assert.equal((await t.prisma.customer.findUniqueOrThrow({ where: { id: customerId } })).emailVerified, false);
+
+        const ok = await confirm({ email, code, verificationToken });
+        assert.equal(ok.status, 200, JSON.stringify(ok.json));
+        assert.equal(ok.json.customerId, customerId);
+        assert.equal(typeof ok.json.token, "string");
+        assert.equal((await t.prisma.customer.findUniqueOrThrow({ where: { id: customerId } })).emailVerified, true);
+        assert.equal((await t.call("GET", "/api/customers/me", { headers: { Authorization: `Bearer ${ok.json.token}` } })).status, 200, "the session works");
+
+        assert.equal((await confirm({ email, code, verificationToken })).status, 400, "the code works once");
+      });
+
+      it("puts the session in a cookie for the web app", async () => {
+        const email = uniqueEmail();
+        const { verificationToken } = await register(email);
+        const code = await sendCode(email);
+        const res = await confirm({ email, code, verificationToken }, { "X-Session-Mode": "cookie" });
+        assert.equal(res.status, 200, JSON.stringify(res.json));
+        assert.equal(res.json.token, undefined);
+        assert.ok(res.headers.get("set-cookie")?.includes("sr_customer="));
+      });
+
+      it("refuses the code alone, as someone who only reads the mailbox would have it", async () => {
+        const email = uniqueEmail();
+        await register(email);
+        const code = await sendCode(email);
+        const res = await confirm({ email, code, verificationToken: "not-a-real-token-at-all" });
+        assert.equal(res.status, 400);
+        assert.equal(res.json.code, "VERIFICATION_EXPIRED");
+        assert.equal(res.json.token, undefined);
+        assert.equal(res.headers.get("set-cookie"), null);
+      });
+
+      it("refuses a token that belongs to another address", async () => {
+        const first = uniqueEmail();
+        const second = uniqueEmail();
+        const a = await register(first);
+        await register(second);
+        const code = await sendCode(second);
+        const res = await confirm({ email: second, code, verificationToken: a.verificationToken });
+        assert.equal(res.status, 400);
+        assert.equal(res.json.code, "VERIFICATION_EXPIRED");
+      });
+
+      it("voids the token when the password is reset", async () => {
+        const email = uniqueEmail();
+        const { customerId, verificationToken } = await register(email);
+        await t.prisma.customer.update({ where: { id: customerId }, data: { tokenVersion: { increment: 1 } } });
+        const code = await sendCode(email);
+        const res = await confirm({ email, code, verificationToken });
+        assert.equal(res.status, 400);
+        assert.equal(res.json.code, "VERIFICATION_EXPIRED");
+      });
+
+      it("lets someone whose login was refused finish confirming, then signs them in", async () => {
+        const email = uniqueEmail();
+        await register(email);
+        const refused = await t.call("POST", "/api/customers/login", { body: { email, password: PASSWORD } });
+        assert.equal(refused.status, 403);
+        assert.equal(refused.json.code, "EMAIL_NOT_VERIFIED");
+        const verificationToken = refused.json.verificationToken as string;
+        assert.equal(typeof verificationToken, "string");
+
+        const code = await sendCode(email);
+        const ok = await confirm({ email, code, verificationToken });
+        assert.equal(ok.status, 200, JSON.stringify(ok.json));
+        assert.equal(typeof ok.json.token, "string");
+      });
+
+      it("does not hand a token to a wrong password", async () => {
+        const email = uniqueEmail();
+        await register(email);
+        const res = await t.call("POST", "/api/customers/login", { body: { email, password: "not-the-password-1" } });
+        assert.equal(res.status, 401);
+        assert.equal(res.json.verificationToken, undefined);
+      });
+    });
+
     it("stores only a digest of the code and verifies it once", async () => {
       const email = uniqueEmail();
       const customer = await t.call("POST", "/api/customers/register", {

@@ -7,6 +7,7 @@
  * phoneVerifiedToken   — 15-min short-lived token proving phone OTP passed for a draft.
  * shopkeeperToken      — 7-day session token for shopkeepers.
  * mfaPendingToken      — 5-min token proving the password step passed, redeemable only for the second step.
+ * emailVerifyToken     — 30-min token proving the password step passed for an unconfirmed email, redeemable only together with the emailed code.
  *
  * HARDENING
  * ──────────
@@ -27,7 +28,7 @@ import jwt from "jsonwebtoken";
 const ALGORITHM = "HS256";
 const ISSUER = "shoproom";
 
-type Audience = "customer" | "shopkeeper" | "phone_verified" | "mfa_pending";
+type Audience = "customer" | "shopkeeper" | "phone_verified" | "mfa_pending" | "email_verify";
 
 function signingSecret(): string {
   const secret = process.env.JWT_SECRET;
@@ -137,6 +138,32 @@ export function verifyMfaPendingToken(token: string): MfaPendingPayload {
     throw new Error("Invalid two-step token");
   }
   return payload as MfaPendingPayload;
+}
+
+// ── Email confirmation: between sign-up (or a login that was refused) and the emailed code ──
+
+export interface EmailVerifyPayload {
+  sub: string;
+  type: "email_verify";
+  /** The account's tokenVersion when the password was accepted; a password reset in between voids this token. */
+  tv: number;
+}
+
+/**
+ * Proves the holder knows the account's password (the sign-up form, or a correct password at login). It starts
+ * no session by itself: it must be presented with the code emailed to the address, which proves the mailbox.
+ */
+export function signEmailVerifyToken(customerId: string, tokenVersion: number): string {
+  const payload: EmailVerifyPayload = { sub: customerId, type: "email_verify", tv: tokenVersion };
+  return sign(payload, "email_verify", "30m");
+}
+
+export function verifyEmailVerifyToken(token: string): EmailVerifyPayload {
+  const payload = verify(token, "email_verify") as Partial<EmailVerifyPayload> | string;
+  if (typeof payload !== "object" || payload === null || payload.type !== "email_verify" || typeof payload.sub !== "string" || typeof payload.tv !== "number") {
+    throw new Error("Invalid email verification token");
+  }
+  return payload as EmailVerifyPayload;
 }
 
 // ── Shopkeeper ────────────────────────────────────────────────────────────────

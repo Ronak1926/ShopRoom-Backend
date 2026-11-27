@@ -1,13 +1,14 @@
 import type { Request, Response } from "express";
 import z from "zod";
 import { parseBody } from "../utils/validate.js";
-import { signCustomerToken, signMfaPendingToken } from "../utils/jwt.js";
+import { signCustomerToken, signEmailVerifyToken, signMfaPendingToken } from "../utils/jwt.js";
 import { isMfaEnabled } from "../services/mfa.service.js";
 import { clearSessionCookie, sendSession } from "../lib/sessionCookie.js";
 import {
   deleteCustomerAccount,
   getCustomerById,
   getJoinedRooms,
+  confirmEmailAndSignIn,
   googleAuthCustomer,
   loginCustomer,
   registerCustomer,
@@ -99,11 +100,13 @@ export async function registerCustomerHandler(req: Request, res: Response) {
     });
   }
 
-  // No session yet: the person confirms their email with the code we send, and then signs in.
+  // No session yet. The person confirms their email with the code we send, presenting this token (which only the
+  // sign-up form received, so it proves they know the password); only both together start a session.
   return res.json({
     customerId: result.customer.id,
     customer: result.customer,
-    message: "Account created. Confirm your email with the code we sent, then sign in.",
+    verificationToken: signEmailVerifyToken(result.customer.id, result.tokenVersion),
+    message: "Account created. Confirm your email with the code we sent.",
   });
 }
 
@@ -190,7 +193,11 @@ export async function loginCustomerHandler(req: Request, res: Response) {
   // Only said once the password is right, so it reveals nothing to someone guessing passwords.
   if (!result.emailVerified) {
     recordSecurityEvent(req, { type: "LOGIN_FAILED", role: "CUSTOMER", actorId: result.customer.id, detail: { method: "password", reason: "email_not_verified" } });
-    return res.status(403).json({ message: "Please confirm your email address to sign in.", code: "EMAIL_NOT_VERIFIED" });
+    return res.status(403).json({
+      message: "Please confirm your email address to sign in.",
+      code: "EMAIL_NOT_VERIFIED",
+      verificationToken: signEmailVerifyToken(result.customer.id, result.tokenVersion),
+    });
   }
 
   if (await isMfaEnabled("CUSTOMER", result.customer.id)) {
@@ -199,6 +206,34 @@ export async function loginCustomerHandler(req: Request, res: Response) {
   recordSecurityEvent(req, { type: "LOGIN_SUCCESS", role: "CUSTOMER", actorId: result.customer.id, detail: { method: "password" } });
   const token = signCustomerToken(result.customer.id, result.tokenVersion);
   return sendSession(req, res, "customer", token, { customerId: result.customer.id });
+}
+
+const confirmEmailSchema = z.object({
+  email: z.string().trim().toLowerCase().email().max(254),
+  code: z.string().regex(/^\d{6}$/),
+  verificationToken: z.string().min(10).max(2048),
+});
+
+/** Confirms the emailed code and, if the caller also holds the verification token, signs them in. */
+export async function confirmEmailHandler(req: Request, res: Response) {
+  const parsed = confirmEmailSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Invalid request" });
+  }
+  const result = await confirmEmailAndSignIn(parsed.data);
+  if (!result.ok) {
+    if (result.reason === "VERIFICATION_EXPIRED") {
+      return res.status(400).json({ message: "This confirmation has expired. Sign in with your password to get a new code.", code: "VERIFICATION_EXPIRED" });
+    }
+    return res.status(400).json({ message: "Invalid or expired code" });
+  }
+
+  if (await isMfaEnabled("CUSTOMER", result.customer.id)) {
+    return res.json({ mfaRequired: true, mfaToken: signMfaPendingToken("CUSTOMER", result.customer.id, result.tokenVersion) });
+  }
+  recordSecurityEvent(req, { type: "LOGIN_SUCCESS", role: "CUSTOMER", actorId: result.customer.id, detail: { method: "email_confirmation" } });
+  const token = signCustomerToken(result.customer.id, result.tokenVersion);
+  return sendSession(req, res, "customer", token, { customerId: result.customer.id, customer: result.customer });
 }
 
 export async function googleAuthCustomerHandler(req: Request, res: Response) {

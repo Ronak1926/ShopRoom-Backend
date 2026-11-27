@@ -15,6 +15,8 @@ const PUBLIC_ROUTES = new Set([
   // sign-up and sign-in
   "POST /api/customers/register",
   "POST /api/customers/login",
+  // the last step of sign-up: it needs the emailed code and the verification token in the body, and starts the session
+  "POST /api/customers/verify-email",
   "POST /api/customers/google-auth",
   "POST /api/shopkeeper/login",
   // forgot / reset password: the whole point is that the caller cannot sign in

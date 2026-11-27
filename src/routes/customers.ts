@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import {
+  confirmEmailHandler,
   deleteAccountHandler,
   loginCustomerHandler,
   logoutAllHandler,
@@ -27,6 +28,7 @@ import {
 } from "../controllers/accountPassword.controller.js";
 import {
   accountDeletionLimiter,
+  emailOtpVerifyLimiter,
   dataExportLimiter,
   mfaLoginAccountLimiter,
   mfaLoginIpLimiter,
@@ -73,6 +75,7 @@ customersRouter.put("/me/location", requireCustomerAuth, locationLimiter, report
 customersRouter.post("/me/devices", requireCustomerAuth, registerDeviceHandler);
 customersRouter.delete("/me/devices", requireCustomerAuth, unregisterDeviceHandler);
 customersRouter.post("/login", loginIpLimiter, loginAccountLimiter, loginCustomerHandler);
+customersRouter.post("/verify-email", emailOtpVerifyLimiter, confirmEmailHandler);
 customersRouter.post("/google-auth", googleAuthLimiter, googleAuthCustomerHandler);
 customersRouter.post("/forgot-password", forgotPasswordIpLimiter, forgotPasswordAccountLimiter, forgotPasswordHandler("CUSTOMER"));
 customersRouter.post("/reset-password", resetPasswordLimiter, resetPasswordHandler("CUSTOMER"));

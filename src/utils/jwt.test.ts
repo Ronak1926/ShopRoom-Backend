@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import jwt from "jsonwebtoken";
 import {
   signCustomerToken,
+  signEmailVerifyToken,
   signPhoneVerifiedToken,
   signShopkeeperToken,
   verifyCustomerToken,
+  verifyEmailVerifyToken,
   verifyPhoneVerifiedToken,
   verifyShopkeeperToken,
 } from "./jwt.js";
@@ -31,6 +33,14 @@ describe("JWT helpers", () => {
     assert.throws(() => verifyShopkeeperToken(signCustomerToken("c1", 0)));
     assert.throws(() => verifyCustomerToken(signShopkeeperToken("s1", 0)));
     assert.throws(() => verifyCustomerToken(signPhoneVerifiedToken("d1", "9876543210")));
+  });
+
+  it("keeps the email verification token from being used as a session, or the other way round", () => {
+    const token = signEmailVerifyToken("c1", 2);
+    assert.deepEqual({ sub: verifyEmailVerifyToken(token).sub, tv: verifyEmailVerifyToken(token).tv }, { sub: "c1", tv: 2 });
+    assert.throws(() => verifyCustomerToken(token));
+    assert.throws(() => verifyShopkeeperToken(token));
+    assert.throws(() => verifyEmailVerifyToken(signCustomerToken("c1", 2)));
   });
 
   it("does not accept a phone-verification token as a session", () => {

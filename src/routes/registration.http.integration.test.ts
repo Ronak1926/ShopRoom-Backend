@@ -283,6 +283,31 @@ describe("shopkeeper registration and payments", { skip: !enabled }, () => {
       return codeFrom(sentEmails.at(-1)!.html);
     }
 
+    it("keeps a new customer out until the email is confirmed, then lets them sign in", async () => {
+      const email = uniqueEmail();
+      const password = "correct-horse-1";
+      const registered = await t.call("POST", "/api/customers/register", { body: { fullName: "Otp User", email, password } });
+      assert.equal(registered.status, 200, JSON.stringify(registered.json));
+      assert.equal(registered.json.token, undefined, "registering starts no session");
+      assert.equal(registered.headers.get("set-cookie"), null);
+
+      const wrong = await t.call("POST", "/api/customers/login", { body: { email, password: "not-the-password-1" } });
+      assert.equal(wrong.status, 401, "a wrong password learns nothing about the email being unconfirmed");
+      assert.equal(wrong.json.code, undefined);
+
+      const blocked = await t.call("POST", "/api/customers/login", { body: { email, password } });
+      assert.equal(blocked.status, 403);
+      assert.equal(blocked.json.code, "EMAIL_NOT_VERIFIED");
+      assert.equal(blocked.json.token, undefined);
+
+      const code = await sendCode(email);
+      assert.equal((await t.call("POST", "/api/otp/verify", { body: { email, code } })).status, 200);
+
+      const allowed = await t.call("POST", "/api/customers/login", { body: { email, password } });
+      assert.equal(allowed.status, 200, JSON.stringify(allowed.json));
+      assert.equal(typeof allowed.json.token, "string");
+    });
+
     it("stores only a digest of the code and verifies it once", async () => {
       const email = uniqueEmail();
       const customer = await t.call("POST", "/api/customers/register", {

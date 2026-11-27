@@ -99,8 +99,12 @@ export async function registerCustomerHandler(req: Request, res: Response) {
     });
   }
 
-  const token = signCustomerToken(result.customer.id, result.tokenVersion);
-  return sendSession(req, res, "customer", token, { customerId: result.customer.id, cusomer: result.customer });
+  // No session yet: the person confirms their email with the code we send, and then signs in.
+  return res.json({
+    customerId: result.customer.id,
+    customer: result.customer,
+    message: "Account created. Confirm your email with the code we sent, then sign in.",
+  });
 }
 
 export async function meCustomerHandler(req: Request, res: Response) {
@@ -181,6 +185,12 @@ export async function loginCustomerHandler(req: Request, res: Response) {
   if (!result.ok) {
     recordSecurityEvent(req, { type: "LOGIN_FAILED", role: "CUSTOMER", actorId: result.customerId, detail: { method: "password" } });
     return res.status(401).json({ message: "Invalid email or password" });
+  }
+
+  // Only said once the password is right, so it reveals nothing to someone guessing passwords.
+  if (!result.emailVerified) {
+    recordSecurityEvent(req, { type: "LOGIN_FAILED", role: "CUSTOMER", actorId: result.customer.id, detail: { method: "password", reason: "email_not_verified" } });
+    return res.status(403).json({ message: "Please confirm your email address to sign in.", code: "EMAIL_NOT_VERIFIED" });
   }
 
   if (await isMfaEnabled("CUSTOMER", result.customer.id)) {

@@ -90,7 +90,11 @@ describe("HTTP security", { skip: !enabled }, () => {
       body: { fullName: "Test Customer", email, password: "correct-horse-1" },
     });
     assert.equal(res.status, 200, JSON.stringify(res.json));
-    return { email, token: res.json.token as string, id: res.json.cusomer.id as string };
+    assert.equal(res.json.token, undefined, "registering does not sign the person in");
+    const id = res.json.customer.id as string;
+    // The email is confirmed with a code before anyone can sign in; these tests are about what comes after.
+    await t.prisma.customer.update({ where: { id }, data: { emailVerified: true } });
+    return { email, token: t.customerToken(id), id };
   }
 
   describe("response headers and transport", () => {

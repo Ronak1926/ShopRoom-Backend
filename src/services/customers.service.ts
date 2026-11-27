@@ -273,6 +273,7 @@ export async function loginCustomer(input: {
     ok: true as const,
     customer: toSafeCustomer(customer),
     tokenVersion: customer.tokenVersion,
+    emailVerified: customer.emailVerified,
   };
 }
 

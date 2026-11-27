@@ -198,6 +198,8 @@ export interface CustomerOptions {
   locationAgeHours?: number;
   member?: { roomId: string; notificationsEnabled?: boolean; joinedAt?: Date };
   devices?: number;
+  /** Whether the email address was confirmed. Defaults to true: an account that can sign in has confirmed it. */
+  emailVerified?: boolean;
 }
 
 export async function createCustomer(prisma: TestPrisma, options: CustomerOptions = {}) {
@@ -208,6 +210,7 @@ export async function createCustomer(prisma: TestPrisma, options: CustomerOption
       fullName: `Customer ${tag}`,
       email: `cust-${tag}@example.test`,
       passwordHash: "x",
+      emailVerified: options.emailVerified ?? true,
       allowLocationAccess: allow,
       latitude: options.location?.latitude ?? null,
       longitude: options.location?.longitude ?? null,

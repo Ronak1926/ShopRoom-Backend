@@ -87,11 +87,11 @@ describe("browser sessions in HttpOnly cookies", { skip: !enabled }, () => {
       assert.equal((await t.call("GET", "/api/shopkeeper/billing", withCookie("sr_shopkeeper", valueOf(cookie!)))).status, 200);
     });
 
-    it("sets a cookie when a customer registers", async () => {
+    it("does not start a session when a customer registers: the email is confirmed first", async () => {
       const res = await t.call("POST", "/api/customers/register", { body: { fullName: "Asha Rao", email: `new-${Date.now()}@example.test`, password: PASSWORD }, headers: COOKIE_MODE });
       assert.equal(res.status, 200, JSON.stringify(res.json));
       assert.equal(res.json.token, undefined);
-      assert.ok(sessionCookie(res.headers, "sr_customer"));
+      assert.equal(sessionCookie(res.headers, "sr_customer"), undefined);
     });
 
     it("sets the cookie only after the second step when two-step verification is on", async () => {

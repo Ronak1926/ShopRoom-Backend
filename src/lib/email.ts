@@ -1,15 +1,84 @@
 import nodemailer from "nodemailer";
 
-function getTransporter() {
-  return nodemailer.createTransport({
+interface MailMessage {
+  from: string | undefined;
+  to: string;
+  replyTo?: string;
+  subject: string;
+  text?: string;
+  html: string;
+  headers?: Record<string, string>;
+}
+
+interface Mailer {
+  sendMail(message: MailMessage): Promise<unknown>;
+}
+
+const BREVO_ENDPOINT = "https://api.brevo.com/v3/smtp/email";
+const API_TIMEOUT_MS = 10_000;
+
+/** The sender, as "Name <address>" or a bare address. MAIL_FROM wins; SMTP_FROM and SMTP_USER still work. */
+function fromAddress(): string | undefined {
+  return process.env.MAIL_FROM?.trim() || process.env.SMTP_FROM?.trim() || process.env.SMTP_USER?.trim() || undefined;
+}
+
+function splitAddress(value: string): { name?: string; email: string } {
+  const match = /^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/.exec(value);
+  if (!match) return { email: value.trim() };
+  const name = match[1].trim();
+  return name ? { name, email: match[2].trim() } : { email: match[2].trim() };
+}
+
+/**
+ * Sends over HTTPS (port 443) instead of SMTP. Hosts such as Render's free plan block outgoing SMTP
+ * ports, so mail never leaves; an HTTPS call is not affected.
+ */
+function brevoMailer(apiKey: string): Mailer {
+  return {
+    async sendMail(message) {
+      if (!message.from) throw new Error("Email sender is not configured (set MAIL_FROM)");
+      const body: Record<string, unknown> = {
+        sender: splitAddress(message.from),
+        to: [{ email: message.to }],
+        subject: message.subject,
+        htmlContent: message.html,
+      };
+      if (message.text) body.textContent = message.text;
+      if (message.replyTo) body.replyTo = { email: message.replyTo };
+      if (message.headers) body.headers = message.headers;
+
+      const response = await fetch(BREVO_ENDPOINT, {
+        method: "POST",
+        headers: { "api-key": apiKey, "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(API_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        const detail = (await response.text().catch(() => "")).slice(0, 200);
+        throw new Error(`Email provider answered ${response.status}${detail ? `: ${detail}` : ""}`);
+      }
+      return response.json().catch(() => null);
+    },
+  };
+}
+
+function getTransporter(): Mailer {
+  const apiKey = process.env.BREVO_API_KEY?.trim();
+  if (apiKey) return brevoMailer(apiKey);
+  // Short limits: a mail server that cannot be reached fails in seconds, not after the 2 minute default.
+  const transport = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT ?? 587),
     secure: process.env.SMTP_SECURE === "true",
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 15_000,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS?.trim(),
     },
   });
+  return { sendMail: (message) => transport.sendMail(message) };
 }
 
 function escapeHtml(value: string): string {
@@ -19,7 +88,7 @@ function escapeHtml(value: string): string {
 export async function sendOtpEmail(to: string, code: string) {
   const transporter = getTransporter();
   await transporter.sendMail({
-    from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
+    from: fromAddress(),
     to,
     subject: "Your CounterCircle verification code",
     html: `
@@ -43,7 +112,7 @@ export async function sendOtpEmail(to: string, code: string) {
 export async function sendPasswordResetEmail(to: string, link: string) {
   const transporter = getTransporter();
   await transporter.sendMail({
-    from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
+    from: fromAddress(),
     to,
     subject: "Reset your CounterCircle password",
     text: `Use this link to choose a new CounterCircle password (valid for 30 minutes):\n\n${link}\n\nIf you didn't ask for this, ignore this email. Your password won't change.`,
@@ -72,7 +141,7 @@ export interface ContactMessage {
 export async function sendContactEmail(to: string, contact: ContactMessage) {
   const transporter = getTransporter();
   await transporter.sendMail({
-    from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
+    from: fromAddress(),
     to,
     replyTo: contact.email,
     subject: `[CounterCircle contact] ${contact.subject}`.replace(/[\r\n]+/g, " ").slice(0, 200),
@@ -83,6 +152,7 @@ export async function sendContactEmail(to: string, contact: ContactMessage) {
 
 /** True when mail can actually be sent. Receipts are skipped (and retried later) rather than failing a payment when it is not. */
 export function isEmailConfigured(): boolean {
+  if (process.env.BREVO_API_KEY?.trim()) return Boolean(fromAddress());
   return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER);
 }
 
@@ -140,7 +210,7 @@ export async function sendPaymentReceiptEmail(to: string, receipt: PaymentReceip
       </div>
     `;
   await getTransporter().sendMail({
-    from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
+    from: fromAddress(),
     to,
     subject: `Your CounterCircle payment receipt (${formatRupees(receipt.amount)})`,
     text,
@@ -151,7 +221,7 @@ export async function sendPaymentReceiptEmail(to: string, receipt: PaymentReceip
 /** Sent once, when an address joins the newsletter. It is also the person's way out. */
 export async function sendNewsletterWelcomeEmail(to: string, unsubscribeUrl: string) {
   await getTransporter().sendMail({
-    from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
+    from: fromAddress(),
     to,
     subject: "You're subscribed to CounterCircle updates",
     headers: { "List-Unsubscribe": `<${unsubscribeUrl}>` },
